@@ -19,8 +19,7 @@ export async function onRequestPost(context) {
                timestamp: timestamp || new Date().toISOString() })
     .select("id").single();
 
-  if (error) return jsonRes({ error: error.message }, 500);
-
+   
   // Mark all admin messages as read when admin replies
   if (sender === "admin") {
     await sb.from("live_chat_messages")
