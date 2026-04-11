@@ -1,93 +1,50 @@
-// functions/api/live-chat.js
-// POST: user sends a message
-// GET:  poll for admin replies by sessionId
-
-import { neon } from "@neondatabase/serverless";
+// functions/api/live-chat.js — Supabase version
+// POST: insert a message, returns { success, id }
+// GET:  fetch messages for a session
+import { getSupabase, jsonRes } from "../_shared/supabase-client.js";
 
 export async function onRequestPost(context) {
-  var request = context.request;
-  var env     = context.env;
+  const { request, env } = context;
+  let body;
+  try { body = await request.json(); }
+  catch (_) { return jsonRes({ error: "Invalid body" }, 400); }
 
-  var body;
-  try {
-    body = await request.json();
-  } catch (e) {
-    return jsonRes({ error: "Invalid body" }, 400);
-  }
-
-  var sessionId = body.sessionId;
-  var sender    = body.sender;
-  var name      = body.name      || null;
-  var text      = body.text;
-  var timestamp = body.timestamp || new Date().toISOString();
-
-  if (!sessionId || !sender || !text) {
+  const { sessionId, sender, name = null, text, timestamp } = body;
+  if (!sessionId || !sender || !text)
     return jsonRes({ error: "sessionId, sender and text are required" }, 400);
+
+  const sb = getSupabase(env);
+  const { data, error } = await sb.from("live_chat_messages")
+    .insert({ session_id: sessionId, sender, name, text,
+               timestamp: timestamp || new Date().toISOString() })
+    .select("id").single();
+
+  if (error) return jsonRes({ error: error.message }, 500);
+
+  // Mark all admin messages as read when admin replies
+  if (sender === "admin") {
+    await sb.from("live_chat_messages")
+      .update({ read: true })
+      .eq("session_id", sessionId).eq("sender", "user");
   }
 
-  if (!env.DATABASE_URL) {
-    return jsonRes({ success: true, warning: "No database — message not persisted" });
-  }
-
-  try {
-    var sql = neon(env.DATABASE_URL);
-    await sql`
-      CREATE TABLE IF NOT EXISTS live_chat_messages (
-        id         SERIAL PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        sender     TEXT NOT NULL,
-        name       TEXT,
-        text       TEXT NOT NULL,
-        timestamp  TIMESTAMPTZ DEFAULT NOW(),
-        read       BOOLEAN DEFAULT false
-      )
-    `;
-    await sql`
-      INSERT INTO live_chat_messages (session_id, sender, name, text, timestamp)
-      VALUES (${sessionId}, ${sender}, ${name}, ${text}, ${timestamp})
-    `;
-    return jsonRes({ success: true });
-  } catch (err) {
-    console.error("[live-chat POST]", err.message);
-    return jsonRes({ error: err.message }, 500);
-  }
+  return jsonRes({ success: true, id: data.id });
 }
 
 export async function onRequestGet(context) {
-  var request = context.request;
-  var env     = context.env;
+  const { request, env } = context;
+  const sessionId = new URL(request.url).searchParams.get("sessionId");
+  if (!sessionId) return jsonRes({ error: "sessionId required" }, 400);
 
-  var url       = new URL(request.url);
-  var sessionId = url.searchParams.get("sessionId");
+  const sb = getSupabase(env);
+  const { data, error } = await sb.from("live_chat_messages")
+    .select("*")
+    .eq("session_id", sessionId)
+    .order("timestamp", { ascending: true })
+    .limit(200);
 
-  if (!sessionId) { return jsonRes({ error: "sessionId required" }, 400); }
-  if (!env.DATABASE_URL) { return jsonRes({ messages: [] }); }
-
-  try {
-    var sql = neon(env.DATABASE_URL);
-    await sql`
-      CREATE TABLE IF NOT EXISTS live_chat_messages (
-        id         SERIAL PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        sender     TEXT NOT NULL,
-        name       TEXT,
-        text       TEXT NOT NULL,
-        timestamp  TIMESTAMPTZ DEFAULT NOW(),
-        read       BOOLEAN DEFAULT false
-      )
-    `;
-    var rows = await sql`
-      SELECT id, session_id, sender, name, text, timestamp
-      FROM live_chat_messages
-      WHERE session_id = ${sessionId}
-      ORDER BY timestamp ASC
-      LIMIT 200
-    `;
-    return jsonRes({ messages: rows });
-  } catch (err) {
-    console.error("[live-chat GET]", err.message);
-    return jsonRes({ messages: [], error: err.message });
-  }
+  if (error) return jsonRes({ messages: [], error: error.message });
+  return jsonRes({ messages: data });
 }
 
 export async function onRequestOptions() {
@@ -95,18 +52,7 @@ export async function onRequestOptions() {
     headers: {
       "Access-Control-Allow-Origin":  "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type"
-    }
-  });
-}
-
-function jsonRes(data, status) {
-  if (!status) { status = 200; }
-  return new Response(JSON.stringify(data), {
-    status: status,
-    headers: {
-      "Content-Type":                "application/json",
-      "Access-Control-Allow-Origin": "*"
-    }
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
   });
 }

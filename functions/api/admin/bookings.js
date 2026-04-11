@@ -1,5 +1,9 @@
 // functions/api/admin/bookings.js
-import { neon } from "@neondatabase/serverless";
+
+import { getSupabase } from "../_shared/supabase-client.js";
+const sb = getSupabase(env);
+const { data: rows, error } = await sb.from("bookings").select("*").eq("id", id);
+if (error) return jsonRes({ error: error.message }, 500);
 
 export async function onRequestGet(context) {
   var env = context.env;
