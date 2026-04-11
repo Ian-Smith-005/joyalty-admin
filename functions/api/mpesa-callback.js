@@ -4,7 +4,7 @@
 // PRODUCTION: change confirmed line as marked below.
 // Self-contained — no relative imports (Cloudflare Pages limitation).
 
-import { getSupabase } from "../_shared/supabase-client.js";
+ import { getSupabase } from "./_shared/supabase-client.js";
 const sb = getSupabase(env);
 const { data: rows, error } = await sb.from("bookings").select("*").eq("id", id);
 

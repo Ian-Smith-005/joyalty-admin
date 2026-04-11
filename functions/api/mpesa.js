@@ -3,7 +3,7 @@
 // NOTE: The repo had bookings.js copied here by mistake — this is the real file.
 // Cloudflare requires: all imports at top, every await inside async, no duplicate exports.
 
-import { getSupabase } from "../_shared/supabase-client.js";
+ import { getSupabase } from "./_shared/supabase-client.js";
 const sb = getSupabase(env);
 const { data: rows, error } = await sb.from("bookings").select("*").eq("id", id);
 
