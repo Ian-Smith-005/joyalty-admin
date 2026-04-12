@@ -1,4 +1,5 @@
 name = "joyalty-admin"
+pages_build_output_dir = "."
 
 [build]
 command = ""

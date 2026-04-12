@@ -6,7 +6,7 @@
     "build": "echo 'No build step'"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.103.0",
+    "@supabase/supabase-js": "^2.49.4",
     "resend": "^4.0.0"
   }
 }
