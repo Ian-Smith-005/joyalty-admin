@@ -1,0 +1,12 @@
+name = "joyalty-admin"
+
+[build]
+command = ""
+
+[functions]
+# Important: Tell Cloudflare to treat Supabase as external
+external = ["@supabase/supabase-js"]
+
+[vars]
+SUPABASE_URL = "https://sabqbqbpdgyallogkfmw.supabase.co"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNhYnFicWJwZGd5YWxsb2drZm13Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4NzYxNDksImV4cCI6MjA5MTQ1MjE0OX0.heoxpeTCJ8EnS2W9Sh_4yrY8Z-fl5JPiYcMlyI7p5ME"
