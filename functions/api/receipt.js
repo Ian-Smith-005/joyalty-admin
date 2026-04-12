@@ -1,46 +1,39 @@
 // functions/api/receipt.js
-// GET /api/receipt?bookingId=X — polled every 3s by services-booking.js
-// ✅ Self-contained — no _shared imports
+// GET /api/receipt?bookingId=X  — polled every 3s by services-booking.js
+// ✅ Uses bare npm specifier — works with Cloudflare Pages + esbuild
+import { createClient } from "@supabase/supabase-js";
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-function getSB(env) {
-  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
-    auth: { persistSession: false },
-  });
+function sb(env) {
+  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
 }
-function json(data, status = 200) {
+function j(data, status = 200) {
   return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+    status, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
   });
 }
 
 export async function onRequestGet(context) {
   const { request, env } = context;
-  if (!env.SUPABASE_URL) return json({ error: "SUPABASE_URL not configured" }, 500);
+  if (!env.SUPABASE_URL) return j({ error: "SUPABASE_URL not set" }, 500);
 
   const url       = new URL(request.url);
   const bookingId = url.searchParams.get("bookingId");
   const ref       = url.searchParams.get("ref");
-  if (!bookingId && !ref) return json({ error: "Provide bookingId or ref" }, 400);
+  if (!bookingId && !ref) return j({ error: "Provide bookingId or ref" }, 400);
 
-  const sb = getSB(env);
-  let query = sb.from("receipts").select("*");
-  if (bookingId) query = query.eq("booking_id", bookingId);
-  else           query = query.eq("receipt_ref", ref);
+  const db = sb(env);
+  let q = db.from("receipts").select("*");
+  q = bookingId ? q.eq("booking_id", bookingId) : q.eq("receipt_ref", ref);
+  const { data, error } = await q.single();
 
-  const { data, error } = await query.single();
-  if (error || !data) return json({ error: "Receipt not found" }, 404);
-  return json({ success: true, receipt: data });
+  if (error || !data) return j({ error: "Receipt not found" }, 404);
+  return j({ success: true, receipt: data });
 }
 
 export async function onRequestOptions() {
-  return new Response(null, {
-    headers: {
-      "Access-Control-Allow-Origin":  "*",
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-    },
-  });
+  return new Response(null, { headers: {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  }});
 }
