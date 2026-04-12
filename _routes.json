@@ -1,5 +1,11 @@
 {
-  "version": 1,
-  "include": ["/api/*"],
-  "exclude": []
+"version": 1,
+"include": ["/api/*"],
+"exclude": [
+    "/admin/*",
+    "/assets/*",
+    "/sw.js",
+    "/manifest.json",
+    "/icons/*"
+]
 }

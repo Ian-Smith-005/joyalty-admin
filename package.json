@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "echo 'No build step'"
+    "build": "npm install"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4",
+    "@google/generative-ai": "^0.3.0",
     "resend": "^4.0.0"
   }
 }
