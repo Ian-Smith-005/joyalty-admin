@@ -1,77 +1,176 @@
-// ════════════════════════════════════════════════════════════
-// JOYALTY ADMIN — admin.js
-// Tabs: Overview · Bookings · Clients · Email · Chat · Analytics
-// Live chat: polls /api/live-chat for client sessions + replies
-// ════════════════════════════════════════════════════════════
+/* ============================================================
+   JOYALTY ADMIN — admin.js  (complete)
+   ✓ Firebase auth — no login flash on refresh
+   ✓ Tab memory via sessionStorage
+   ✓ Supabase Realtime — live chat push (no polling)
+   ✓ Joy AI — Gemini with live dashboard context
+   ✓ Double-bubble fix — sentIds Set + data-msg-id dedup
+   ✓ Push notifications (Web Push API)
+   ✓ Profile editor with avatar preview
+   ✓ Bottom nav + More sheet for mobile
+   ✓ Full CRUD on bookings
+============================================================ */
 
+// ── Supabase realtime client (browser, anon key) ──────────────
+// Set window.SUPABASE_URL and window.SUPABASE_ANON in a <script>
+// before this file loads (see index.html), or set them here:
+const SB_URL = window.SUPABASE_URL || "https://YOUR_PROJECT.supabase.co";
+const SB_ANON = window.SUPABASE_ANON || "YOUR_ANON_KEY";
+const sbClient = supabase.createClient(SB_URL, SB_ANON);
+
+// ── State ──────────────────────────────────────────────────────
 let currentUser = null;
 let allBookings = [];
 let allClients = [];
-let adminChatMode = "bot"; // "bot" | "live"
-let aiConversation = [];
+let adminChatMode = "bot";
+let aiConvo = [];
+let activeSession = null; // "joy" | sessionId string
+let sentIds = new Set(); // dedup outgoing bubbles
+let rtChannel = null;
+let unread = 0;
+let prefs = loadPrefs();
+let editBookingId = null;
 
-// ── Auth ──────────────────────────────────────────────────────
-function _showApp(user) {
-  currentUser = user;
-  const initials = (user.displayName || user.email || "A")[0].toUpperCase();
-  document.getElementById("loginScreen").style.display = "none";
-  document.getElementById("adminApp").style.display = "flex";
-  document.getElementById("adminNameDisplay").textContent =
-    user.displayName || user.email.split("@")[0];
-  document.getElementById("adminAvatarInitial").textContent = initials;
-  initDashboard();
+// ═══════════════════════════════════════════════════════════════
+// SUPABASE REALTIME
+// ═══════════════════════════════════════════════════════════════
+function subscribeRealtime() {
+  if (rtChannel) sbClient.removeChannel(rtChannel);
+  rtChannel = sbClient
+    .channel("admin-live-chat")
+    .on(
+      "postgres_changes",
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "live_chat_messages",
+      },
+      (payload) => {
+        const msg = payload.new;
+        if (!msg) return;
+        // Skip our own admin messages already rendered optimistically
+        if (msg.sender === "admin" && sentIds.has(String(msg.id))) return;
+
+        // Cache message
+        if (!liveCache[msg.session_id]) liveCache[msg.session_id] = [];
+        liveCache[msg.session_id].push(msg);
+
+        if (msg.session_id === activeSession) {
+          renderBubble(msg);
+        } else {
+          // New message in another session
+          unread++;
+          updateBadges();
+          loadSessions();
+          if (prefs.chatNotif !== false) {
+            pushNotif("New message from " + (msg.name || "a client"), msg.text);
+            if (prefs.soundNotif) beep();
+          }
+        }
+      },
+    )
+    .subscribe();
 }
-function _showLogin(errorMsg) {
-  document.getElementById("adminApp").style.display = "none";
-  document.getElementById("loginScreen").style.display = "flex";
-  if (errorMsg) {
-    const e = document.getElementById("loginError");
-    e.textContent = errorMsg;
-    e.style.display = "block";
+
+const liveCache = {};
+
+// ═══════════════════════════════════════════════════════════════
+// AUTH
+// ═══════════════════════════════════════════════════════════════
+function showApp(user) {
+  currentUser = user;
+  set("loginScreen", "display", "none");
+  set("adminApp", "display", "flex");
+
+  const init = (user.displayName || user.email || "A")[0].toUpperCase();
+  setText("sbAvatar", init);
+  setText("sbName", user.displayName || user.email.split("@")[0]);
+  setText("avaPreview", init);
+  setVal("profileEmail", user.email || "");
+  setVal("profileName", ls("adminDisplayName") || user.displayName || "");
+  setVal("profileStudio", ls("adminStudio") || "");
+  setVal("profilePhone", ls("adminPhone") || "");
+
+  const savedAva = ls("adminAva");
+  if (savedAva) setAva(savedAva);
+
+  loadPrefsUI();
+  subscribeRealtime();
+  initDash();
+
+  const lastTab = sessionStorage.getItem("adminTab") || "overview";
+  switchTab(lastTab, true);
+}
+
+function showLogin(err) {
+  set("adminApp", "display", "none");
+  set("loginScreen", "display", "flex");
+  if (err) {
+    const el = g("loginError");
+    if (el) {
+      el.textContent = err;
+      el.style.display = "block";
+    }
   }
 }
+
 async function doLogin() {
-  const email = document.getElementById("loginEmail").value.trim();
-  const pass = document.getElementById("loginPass").value;
-  const errEl = document.getElementById("loginError");
-  const btnTxt = document.getElementById("loginBtnText");
-  errEl.style.display = "none";
+  const email = getVal("loginEmail"),
+    pass = getVal("loginPass");
+  const errEl = g("loginError"),
+    btn = g("loginBtnText");
+  if (errEl) errEl.style.display = "none";
   if (!email || !pass) {
-    errEl.textContent = "Enter your email and password.";
-    errEl.style.display = "block";
+    showErr(errEl, "Enter your email and password.");
     return;
   }
-  btnTxt.innerHTML = '<span class="spinner"></span>';
+  if (btn) btn.innerHTML = '<span class="spinner"></span>';
   try {
     const user = await window.joyaltyAuth.firebaseSignIn(email, pass);
-    _showApp(user);
-  } catch (err) {
-    btnTxt.textContent = "Sign In";
-    const msg =
-      err.code === "auth/wrong-password" || err.code === "auth/user-not-found"
+    showApp(user);
+  } catch (e) {
+    if (btn) btn.textContent = "Sign In";
+    showErr(
+      errEl,
+      e.code === "auth/wrong-password" || e.code === "auth/user-not-found"
         ? "Incorrect email or password."
-        : err.message || "Login failed.";
-    errEl.textContent = msg;
-    errEl.style.display = "block";
+        : e.message || "Login failed.",
+    );
   }
 }
+
 async function doLogout() {
-  stopLivePoll();
+  if (rtChannel) sbClient.removeChannel(rtChannel);
   await window.joyaltyAuth.firebaseSignOut().catch(() => {});
   currentUser = null;
-  _showLogin();
-  document.getElementById("loginEmail").value = "";
-  document.getElementById("loginPass").value = "";
+  sessionStorage.removeItem("adminTab");
+  showLogin();
+  setVal("loginEmail", "");
+  setVal("loginPass", "");
 }
-document.getElementById("loginPass").addEventListener("keypress", (e) => {
+
+function togglePw() {
+  const inp = g("loginPass"),
+    ico = g("pwIcon");
+  if (!inp) return;
+  const show = inp.type === "password";
+  inp.type = show ? "text" : "password";
+  if (ico) ico.className = show ? "fa-solid fa-eye-slash" : "fa-solid fa-eye";
+}
+
+g("loginPass")?.addEventListener("keypress", (e) => {
   if (e.key === "Enter") doLogin();
 });
+
+// Persist auth — no flash to login page on refresh
 window.joyaltyAuth.checkAuthState(
-  (user) => _showApp(user),
-  () => _showLogin(),
+  (user) => showApp(user),
+  () => showLogin(),
 );
 
-// ── Tab navigation ────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════════════════════════
 const TAB_TITLES = {
   overview: "Overview",
   bookings: "Bookings",
@@ -79,139 +178,244 @@ const TAB_TITLES = {
   email: "Email",
   chat: "Chat",
   analytics: "Analytics",
+  profile: "Profile",
 };
-function switchTab(tab) {
+
+function switchTab(tab, silent) {
   document
-    .querySelectorAll(".tab-section")
+    .querySelectorAll(".tab")
     .forEach((s) => s.classList.remove("active"));
   document
-    .querySelectorAll(".nav-item")
-    .forEach((n) => n.classList.remove("active"));
-  document.getElementById(`tab-${tab}`).classList.add("active");
-  document
-    .querySelector(`.nav-item[onclick*="${tab}"]`)
-    .classList.add("active");
-  document.getElementById("tabTitle").textContent = TAB_TITLES[tab] || tab;
+    .querySelectorAll(".nav-item[data-tab], .bn-item[data-tab]")
+    .forEach((n) => {
+      n.classList.toggle("active", n.dataset.tab === tab);
+    });
+  g("tab-" + tab)?.classList.add("active");
+  setText("tabTitle", TAB_TITLES[tab] || tab);
+  if (!silent) sessionStorage.setItem("adminTab", tab);
+
   if (tab === "bookings") loadBookings();
   if (tab === "clients") loadClients();
   if (tab === "analytics") renderAnalytics();
-  if (tab === "chat") initAdminChat();
-  if (tab !== "chat") stopLivePoll();
+  if (tab === "chat") {
+    initChat();
+    resetUnread();
+  }
 }
 
-// ── Dashboard init ────────────────────────────────────────────
-async function initDashboard() {
-  await loadStats();
-  await loadBookings();
+document
+  .querySelectorAll(".nav-item[data-tab], .bn-item[data-tab]")
+  .forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const t = btn.dataset.tab;
+      if (t && t !== "more") switchTab(t);
+    });
+  });
+
+// ═══════════════════════════════════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════════════════════════════════
+async function initDash() {
+  await Promise.all([loadStats(), loadBookings()]);
   renderOverviewCharts();
 }
 
-// ── Stats ─────────────────────────────────────────────────────
 async function loadStats() {
   try {
-    const r = await fetch("/api/admin/stats");
-    const data = await r.json();
-    if (data.error) return;
-    document.getElementById("st-total").textContent = data.totalBookings ?? "—";
-    document.getElementById("st-confirmed").textContent =
-      data.confirmedBookings ?? "—";
-    document.getElementById("st-pending").textContent =
-      data.pendingBookings ?? "—";
-    document.getElementById("st-revenue").textContent =
-      data.totalRevenue != null
-        ? Number(data.totalRevenue).toLocaleString()
-        : "—";
-    document.getElementById("pendingCount").textContent =
-      data.pendingBookings ?? 0;
+    const d = await api("/api/admin/stats");
+    if (d.error) return;
+    setText("st-total", d.totalBookings ?? "—");
+    setText("st-confirmed", d.confirmedBookings ?? "—");
+    setText("st-pending", d.pendingBookings ?? "—");
+    setText(
+      "st-revenue",
+      d.totalRevenue ? Number(d.totalRevenue).toLocaleString() : "—",
+    );
+    const p = d.pendingBookings ?? 0;
+    setText("pendingBadge", p);
+    g("pendingBadge").style.display = p > 0 ? "" : "none";
+    setText("bnPending", p);
+    g("bnPending").style.display = p > 0 ? "" : "none";
   } catch (_) {}
 }
 
-// ── Bookings ──────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// BOOKINGS
+// ═══════════════════════════════════════════════════════════════
 async function loadBookings() {
   try {
-    const r = await fetch("/api/admin/bookings");
-    const data = await r.json();
-    if (data.error) {
-      showAlert("bookingsAlert", data.error, "error");
+    const d = await api("/api/admin/bookings");
+    if (!Array.isArray(d.bookings)) {
+      showAlert("bookingsAlert", d.error || "Load failed.", "error");
       return;
     }
-    allBookings = data.bookings || [];
+    allBookings = d.bookings;
     renderBookings(allBookings);
-  } catch (err) {
-    showAlert(
-      "bookingsAlert",
-      "Failed to load bookings: " + err.message,
-      "error",
-    );
+  } catch (e) {
+    showAlert("bookingsAlert", e.message, "error");
   }
 }
 
 function renderBookings(rows) {
-  const tbody = document.getElementById("bookingsBody");
-  if (!tbody) return;
+  const tb = g("bookingsBody");
+  if (!tb) return;
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No bookings found.</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="7"><div class="empty-state"><i class="fa-solid fa-calendar-xmark" style="font-size:2rem;opacity:.3;display:block;margin-bottom:10px"></i>No bookings yet</div></td></tr>`;
     return;
   }
-  tbody.innerHTML = rows
+  tb.innerHTML = rows
     .map(
       (b) => `
     <tr>
-      <td><code style="font-size:.78rem">${esc(b.booking_ref)}</code></td>
-      <td>
-        <div style="font-weight:600">${esc(b.client_name || "")}</div>
-        <div style="font-size:.75rem;color:var(--muted)">${esc(b.client_email || "")}</div>
-      </td>
-      <td>${esc(b.service_name || "")} <span style="color:var(--muted);font-size:.78rem">${esc(b.package_name || "")}</span></td>
-      <td>${b.event_date ? new Date(b.event_date).toLocaleDateString("en-KE") : "—"}</td>
-      <td>KSh ${Number(b.total_price || 0).toLocaleString()}</td>
-      <td>${statusBadge(b.status)}</td>
-      <td>
-        <button class="action-btn edit"   onclick="openEditBooking(${b.id})"   title="Edit">  <i class="fa-solid fa-pen"></i></button>
-        <button class="action-btn"        onclick="openEmailClient('${esc(b.client_email)}','${esc(b.booking_ref)}')" title="Email"><i class="fa-solid fa-envelope"></i></button>
-        <button class="action-btn delete" onclick="openDeleteModal(${b.id})"  title="Delete"><i class="fa-solid fa-trash"></i></button>
+      <td style="font-family:monospace;font-size:.77rem">${esc(b.booking_ref)}</td>
+      <td><div style="font-weight:600">${esc(b.client_name || "—")}</div><div style="font-size:.73rem;color:var(--muted)">${esc(b.client_email || "")}</div></td>
+      <td>${esc(b.service_name || "—")}</td>
+      <td style="font-size:.81rem">${b.event_date ? new Date(b.event_date).toLocaleDateString("en-KE") : "—"}</td>
+      <td style="font-weight:600">KSh ${Number(b.total_price || 0).toLocaleString()}</td>
+      <td>${badge(b.status)}</td>
+      <td style="white-space:nowrap">
+        <button class="act-btn edit" onclick="openEditBooking(${b.id})" title="Edit"><i class="fa-solid fa-pen"></i></button>
+        <button class="act-btn"      onclick="emailShortcut('${esc(b.client_email)}','${esc(b.booking_ref)}')" title="Email"><i class="fa-solid fa-envelope"></i></button>
+        <button class="act-btn del"  onclick="openDeleteBooking(${b.id})" title="Delete"><i class="fa-solid fa-trash"></i></button>
       </td>
     </tr>`,
     )
     .join("");
 }
 
-function statusBadge(s) {
-  const map = {
-    confirmed: "confirmed",
-    pending_payment: "pending",
-    cancelled: "cancelled",
-    completed: "completed",
-  };
-  const cls = map[s] || "pending";
-  const lbl = s === "pending_payment" ? "Pending" : s || "—";
+function badge(s) {
+  const cls = s === "pending_payment" ? "pending" : s || "pending";
+  const lbl =
+    s === "pending_payment"
+      ? "Pending"
+      : s
+        ? s[0].toUpperCase() + s.slice(1)
+        : "—";
   return `<span class="status-badge ${cls}">${esc(lbl)}</span>`;
 }
 
-// ── Clients ───────────────────────────────────────────────────
+// CRUD
+function openCreateBooking() {
+  editBookingId = null;
+  setText("bmTitle", "New Booking");
+  [
+    "bm-name",
+    "bm-email",
+    "bm-phone",
+    "bm-date",
+    "bm-location",
+    "bm-notes",
+  ].forEach((i) => setVal(i, ""));
+  setIdx("bm-service", 0);
+  setIdx("bm-package", 0);
+  setIdx("bm-extra", 0);
+  openModal("bookingModal");
+}
+function openEditBooking(id) {
+  const b = allBookings.find((x) => x.id === id);
+  if (!b) return;
+  editBookingId = id;
+  setText("bmTitle", "Edit Booking");
+  setVal("bm-name", b.client_name || "");
+  setVal("bm-email", b.client_email || "");
+  setVal("bm-phone", b.client_phone || "");
+  setVal("bm-location", b.event_location || "");
+  setVal("bm-notes", b.event_description || "");
+  setVal("bm-date", b.event_date ? b.event_date.slice(0, 10) : "");
+  selByText("bm-service", b.service_name || "");
+  selByText("bm-package", b.package_name || "Standard");
+  selByText("bm-extra", b.extra_name || "None");
+  openModal("bookingModal");
+}
+function selByText(id, txt) {
+  const s = g(id);
+  if (!s) return;
+  for (let i = 0; i < s.options.length; i++) {
+    if (s.options[i].text === txt || s.options[i].value === txt) {
+      s.selectedIndex = i;
+      return;
+    }
+  }
+}
+async function submitBooking() {
+  const body = {
+    clientName: getVal("bm-name"),
+    clientEmail: getVal("bm-email"),
+    clientPhone: getVal("bm-phone"),
+    serviceType: getVal("bm-service"),
+    servicePackage: getVal("bm-package") || "Standard",
+    extraServices: getVal("bm-extra") || "None",
+    eventDate: getVal("bm-date") || null,
+    eventLocation: getVal("bm-location") || null,
+    eventDescription: getVal("bm-notes") || null,
+  };
+  if (!body.clientName || !body.clientEmail || !body.serviceType) {
+    showAlert("bmAlert", "Name, email and service required.", "error");
+    return;
+  }
+  try {
+    const ep = editBookingId
+      ? `/api/admin/bookings/${editBookingId}`
+      : "/api/bookings";
+    const d = await api(ep, {
+      method: editBookingId ? "PUT" : "POST",
+      body: JSON.stringify(body),
+    });
+    if (d.success || d.bookingRef) {
+      closeModal("bookingModal");
+      await Promise.all([loadBookings(), loadStats()]);
+      toast(
+        editBookingId ? "Booking updated." : `Booking ${d.bookingRef} created.`,
+        "success",
+      );
+      switchTab("bookings");
+    } else {
+      showAlert("bmAlert", d.error || "Failed.", "error");
+    }
+  } catch (e) {
+    showAlert("bmAlert", e.message, "error");
+  }
+}
+function openDeleteBooking(id) {
+  setVal("deleteId", id);
+  openModal("deleteModal");
+}
+async function confirmDelete() {
+  const id = getVal("deleteId");
+  try {
+    const d = await api(`/api/admin/bookings/${id}`, { method: "DELETE" });
+    closeModal("deleteModal");
+    if (d.success) {
+      await Promise.all([loadBookings(), loadStats()]);
+      toast("Booking deleted.", "success");
+    } else toast(d.error || "Delete failed.", "error");
+  } catch (e) {
+    closeModal("deleteModal");
+    toast(e.message, "error");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CLIENTS
+// ═══════════════════════════════════════════════════════════════
 async function loadClients() {
   try {
-    const r = await fetch("/api/admin/clients");
-    const data = await r.json();
-    if (data.error) return;
-    allClients = data.clients || [];
-    const tbody = document.getElementById("clientsBody");
-    if (!tbody) return;
-    tbody.innerHTML = allClients
-      .map(
-        (c) => `
-      <tr>
-        <td>${esc(c.name || "")}</td>
-        <td>${esc(c.email || "")}</td>
-        <td>${esc(c.phone || "")}</td>
-        <td>${c.created_at ? new Date(c.created_at).toLocaleDateString("en-KE") : "—"}</td>
-      </tr>`,
-      )
-      .join("");
+    const d = await api("/api/admin/clients");
+    if (!Array.isArray(d.clients)) return;
+    allClients = d.clients;
+    const tb = g("clientsBody");
+    if (!tb) return;
+    tb.innerHTML = allClients.length
+      ? allClients
+          .map(
+            (c) =>
+              `<tr><td style="font-weight:600">${esc(c.name)}</td><td>${esc(c.email)}</td><td>${esc(c.phone || "—")}</td><td style="font-size:.79rem;color:var(--muted)">${c.created_at ? new Date(c.created_at).toLocaleDateString("en-KE") : "—"}</td></tr>`,
+          )
+          .join("")
+      : `<tr><td colspan="4"><div class="empty-state">No clients yet</div></td></tr>`;
   } catch (_) {}
 }
 
-// ── Search ────────────────────────────────────────────────────
 function onSearch(q) {
   if (!q) {
     renderBookings(allBookings);
@@ -229,526 +433,454 @@ function onSearch(q) {
   );
 }
 
-// ── Booking modal ─────────────────────────────────────────────
-let editingBookingId = null;
-function openCreateBooking() {
-  editingBookingId = null;
-  document.getElementById("bookingModalTitle").textContent = "New Booking";
-  ["bm-name", "bm-email", "bm-phone", "bm-location", "bm-notes"].forEach(
-    (id) => {
-      const el = document.getElementById(id);
-      if (el) el.value = "";
-    },
-  );
-  document.getElementById("bm-service").selectedIndex = 0;
-  document.getElementById("bm-package").selectedIndex = 0;
-  document.getElementById("bm-extra").selectedIndex = 0;
-  document.getElementById("bm-date").value = "";
-  openModal("bookingModal");
-}
-function openEditBooking(id) {
-  const b = allBookings.find((x) => x.id === id);
-  if (!b) return;
-  editingBookingId = id;
-  document.getElementById("bookingModalTitle").textContent = "Edit Booking";
-  document.getElementById("bm-name").value = b.client_name || "";
-  document.getElementById("bm-email").value = b.client_email || "";
-  document.getElementById("bm-phone").value = b.client_phone || "";
-  document.getElementById("bm-location").value = b.event_location || "";
-  document.getElementById("bm-notes").value = b.event_description || "";
-  document.getElementById("bm-date").value = b.event_date
-    ? b.event_date.slice(0, 10)
-    : "";
-  // Set selects
-  ["bm-service", "bm-package", "bm-extra"].forEach((selId, i) => {
-    const vals = [b.service_name, b.package_name, b.extra_name];
-    const sel = document.getElementById(selId);
-    if (!sel || !vals[i]) return;
-    for (let j = 0; j < sel.options.length; j++) {
-      if (sel.options[j].value === vals[i] || sel.options[j].text === vals[i]) {
-        sel.selectedIndex = j;
-        break;
-      }
-    }
-  });
-  openModal("bookingModal");
-}
-async function submitBookingModal() {
-  const alertId = "bookingModalAlert";
-  if (editingBookingId) {
-    // PUT — update existing
-    const body = {
-      status: null,
-      eventDate: document.getElementById("bm-date")?.value || null,
-      eventLocation: document.getElementById("bm-location")?.value || null,
-      eventDescription: document.getElementById("bm-notes")?.value || null,
-    };
-    try {
-      const r = await fetch(`/api/admin/bookings/${editingBookingId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await r.json();
-      if (data.success) {
-        closeModal("bookingModal");
-        loadBookings();
-        showAlert("bookingsAlert", "Booking updated.", "success");
-      } else {
-        showAlert(alertId, data.error || "Update failed.", "error");
-      }
-    } catch (err) {
-      showAlert(alertId, err.message, "error");
-    }
-  } else {
-    // POST — new booking (admin-created, no M-Pesa)
-    const payload = {
-      clientName: document.getElementById("bm-name")?.value.trim(),
-      clientEmail: document.getElementById("bm-email")?.value.trim(),
-      clientPhone: document.getElementById("bm-phone")?.value.trim(),
-      serviceType: document.getElementById("bm-service")?.value,
-      servicePackage:
-        document.getElementById("bm-package")?.value || "Standard",
-      extraServices: document.getElementById("bm-extra")?.value || "None",
-      eventDate: document.getElementById("bm-date")?.value || null,
-      eventLocation: document.getElementById("bm-location")?.value || null,
-      eventDescription: document.getElementById("bm-notes")?.value || null,
-    };
-    if (
-      !payload.clientName ||
-      !payload.clientEmail ||
-      !payload.clientPhone ||
-      !payload.serviceType
-    ) {
-      showAlert(
-        alertId,
-        "Name, email, phone and service are required.",
-        "error",
-      );
-      return;
-    }
-    try {
-      const r = await fetch("/api/bookings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await r.json();
-      if (data.success) {
-        closeModal("bookingModal");
-        loadBookings();
-        loadStats();
-        showAlert(
-          "bookingsAlert",
-          `Booking ${data.bookingRef} created.`,
-          "success",
-        );
-      } else {
-        showAlert(alertId, data.error || "Failed to create booking.", "error");
-      }
-    } catch (err) {
-      showAlert(alertId, err.message, "error");
-    }
-  }
-}
-
-// ── Delete booking ────────────────────────────────────────────
-function openDeleteModal(id) {
-  document.getElementById("deleteBookingId").value = id;
-  openModal("deleteModal");
-}
-async function confirmDelete() {
-  const id = document.getElementById("deleteBookingId").value;
-  try {
-    const r = await fetch(`/api/admin/bookings/${id}`, { method: "DELETE" });
-    const data = await r.json();
-    if (data.success) {
-      closeModal("deleteModal");
-      loadBookings();
-      loadStats();
-      showAlert("bookingsAlert", "Booking deleted.", "success");
-    } else {
-      showAlert("bookingsAlert", data.error || "Delete failed.", "error");
-      closeModal("deleteModal");
-    }
-  } catch (err) {
-    showAlert("bookingsAlert", err.message, "error");
-    closeModal("deleteModal");
-  }
-}
-
-// ── Email client shortcut ─────────────────────────────────────
-function openEmailClient(email, ref) {
+// ═══════════════════════════════════════════════════════════════
+// EMAIL
+// ═══════════════════════════════════════════════════════════════
+function emailShortcut(email, ref) {
   switchTab("email");
-  const toEl = document.getElementById("emailTo");
-  const subEl = document.getElementById("emailSubject");
-  if (toEl) toEl.value = email;
-  if (subEl) subEl.value = `Re: Your booking ${ref} — Joyalty Photography`;
+  setVal("emailTo", email);
+  setVal("emailSubject", `Re: Your booking ${ref} — Joyalty Photography`);
 }
-
-// ── Send admin email ──────────────────────────────────────────
 async function sendAdminEmail() {
-  const to = document.getElementById("emailTo")?.value.trim();
-  const subject = document.getElementById("emailSubject")?.value.trim();
-  const body = document.getElementById("emailBody")?.value.trim();
-  if (!to || !subject || !body) {
-    showAlert("emailAlert", "Fill in all fields before sending.", "error");
+  const to = getVal("emailTo"),
+    subject = getVal("emailSubject"),
+    message = getVal("emailBody");
+  if (!to || !subject || !message) {
+    showAlert("emailAlert", "Fill all fields.", "error");
     return;
   }
   try {
-    const r = await fetch("/api/contact", {
+    const d = await api("/api/contact", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: "Joyalty Admin",
         email: to,
         subject,
-        message: body,
+        message,
       }),
     });
-    const data = await r.json();
-    if (data.success) {
-      showAlert("emailAlert", "Email sent successfully.", "success");
-      document.getElementById("emailBody").value = "";
-    } else {
-      showAlert("emailAlert", data.error || "Send failed.", "error");
-    }
-  } catch (err) {
-    showAlert("emailAlert", err.message, "error");
+    if (d.success) {
+      showAlert("emailAlert", "Email sent.", "success");
+      ["emailTo", "emailSubject", "emailBody"].forEach((i) => setVal(i, ""));
+    } else showAlert("emailAlert", d.error || "Send failed.", "error");
+  } catch (e) {
+    showAlert("emailAlert", e.message, "error");
   }
 }
 
-// ════════════════════════════════════════════════════════════
-// LIVE CHAT — admin side
-// ════════════════════════════════════════════════════════════
-
-let liveSessions = {}; // { sessionId: [messages] }
-let activeSessionId = null;
-let livePollTimer = null;
-let sessionsLoadTimer = null;
-
-function initAdminChat() {
-  document
-    .getElementById("modeBtnBot")
-    .classList.toggle("active", adminChatMode === "bot");
-  document
-    .getElementById("modeBtnLive")
-    .classList.toggle("active", adminChatMode === "live");
-  if (adminChatMode === "bot") {
-    renderBotContact();
-  } else {
-    loadLiveSessions();
-    startSessionsRefresh();
-  }
+// ═══════════════════════════════════════════════════════════════
+// CHAT — Joy AI + Live (Supabase Realtime)
+// ═══════════════════════════════════════════════════════════════
+function initChat() {
+  g("modeBtnBot")?.classList.toggle("active", adminChatMode === "bot");
+  g("modeBtnLive")?.classList.toggle("active", adminChatMode === "live");
+  if (adminChatMode === "bot") renderBotContact();
+  else loadSessions();
 }
 
 function setChatMode(mode) {
   adminChatMode = mode;
-  document
-    .getElementById("modeBtnBot")
-    .classList.toggle("active", mode === "bot");
-  document
-    .getElementById("modeBtnLive")
-    .classList.toggle("active", mode === "live");
-  document.getElementById("contactList").innerHTML = "";
-  document.getElementById("adminChatMessages").innerHTML = "";
-  activeSessionId = null;
-  stopLivePoll();
-  if (sessionsLoadTimer) {
-    clearInterval(sessionsLoadTimer);
-    sessionsLoadTimer = null;
-  }
-
+  g("modeBtnBot")?.classList.toggle("active", mode === "bot");
+  g("modeBtnLive")?.classList.toggle("active", mode === "live");
+  g("adminMsgs").innerHTML = "";
+  activeSession = null;
   if (mode === "bot") {
     renderBotContact();
+    showContacts();
   } else {
-    loadLiveSessions();
-    startSessionsRefresh();
+    loadSessions();
+    showContacts();
   }
 }
 
-// ── Bot contact ───────────────────────────────────────────────
+/* ── Bot ────────────────────────────────────────────────────── */
 function renderBotContact() {
-  const list = document.getElementById("contactList");
-  list.innerHTML = `
-    <div class="contact-item active" onclick="selectBotContact(this)">
-      <div class="contact-avatar bot"><i class="fa-solid fa-robot"></i></div>
-      <div>
-        <div class="contact-name">Joy — AI Assistant</div>
-        <div class="contact-preview">Ask about bookings, clients…</div>
-      </div>
+  g("contactList").innerHTML = `
+    <div class="contact-item active" id="botItem" onclick="selectBot(this)">
+      <div class="c-ava bot"><i class="fa-solid fa-robot"></i></div>
+      <div><div class="c-name">Joy — AI Assistant</div><div class="c-prev">Ask about bookings, revenue, clients…</div></div>
     </div>`;
-  selectBotContact(list.firstElementChild);
+  selectBot(g("botItem"));
 }
-function selectBotContact(el) {
+
+function selectBot(el) {
   document
     .querySelectorAll(".contact-item")
     .forEach((e) => e.classList.remove("active"));
   el.classList.add("active");
-  activeSessionId = "joy";
-  document.getElementById("chatActiveName").textContent = "Joy — AI Assistant";
-  document.getElementById("chatActiveSub").textContent = "Gemini-powered";
-  const msgs = document.getElementById("adminChatMessages");
-  msgs.innerHTML = "";
-  aiConversation = [];
-  if (!msgs.children.length) {
-    appendMsg(
-      "Hi Admin 👋 Ask me anything about your bookings or clients.",
-      "incoming",
-      "🤖",
-    );
-  }
+  activeSession = "joy";
+  setText("chatHdName", "Joy — AI Assistant");
+  setText("chatHdSub", "Gemini · live dashboard context");
+  g("chatHdAva").className = "chat-ava bot";
+  g("chatHdAva").innerHTML = '<i class="fa-solid fa-robot"></i>';
+  g("adminMsgs").innerHTML = "";
+  aiConvo = [];
+  appendMsg(
+    "Hi Admin 👋 I have access to your live bookings, clients and revenue data. Ask me anything.",
+    "in",
+    "🤖",
+  );
+  showChat();
 }
 
-// ── Load live sessions from DB ────────────────────────────────
-async function loadLiveSessions() {
-  // Fetch all unique sessions by querying recent messages without a sessionId filter
+/* ── Live sessions ──────────────────────────────────────────── */
+async function loadSessions() {
   try {
-    const r = await fetch("/api/live-chat/sessions");
-    const data = await r.json().catch(() => null);
-
-    if (data && data.sessions) {
-      renderSessionContacts(data.sessions);
-    } else {
-      // Fallback: render existing cached sessions
-      renderSessionContacts(
-        Object.keys(liveSessions).map((id) => ({
-          session_id: id,
-          name: liveSessions[id]?.[0]?.name || id.split("-")[0],
-          last_text: liveSessions[id]?.slice(-1)[0]?.text || "",
-          unread: countUnread(id),
-        })),
-      );
-    }
+    const d = await api("/api/live-chat/sessions");
+    renderContacts(d.sessions || []);
   } catch (_) {
-    // Show cached if any
-    renderSessionContacts(
-      Object.keys(liveSessions).map((id) => ({
-        session_id: id,
-        name: liveSessions[id]?.[0]?.name || id.split("-")[0],
-        last_text: liveSessions[id]?.slice(-1)[0]?.text || "",
-        unread: countUnread(id),
-      })),
-    );
+    renderContacts([]);
   }
 }
 
-function renderSessionContacts(sessions) {
-  const list = document.getElementById("contactList");
+function renderContacts(sessions) {
+  const list = g("contactList");
   if (!sessions.length) {
-    list.innerHTML = `<div class="empty-state" style="padding:24px 16px;font-size:.82rem">No live chat sessions yet.</div>`;
+    list.innerHTML = `<div class="empty-state" style="padding:20px 14px;font-size:.82rem">No live sessions yet.</div>`;
     return;
   }
   list.innerHTML = sessions
-    .map(
-      (s) => `
-    <div class="contact-item ${s.session_id === activeSessionId ? "active" : ""}"
-         onclick="selectLiveSession('${esc(s.session_id)}', '${esc(s.name || s.session_id.split("-")[0])}')">
-      <div class="contact-avatar">${(s.name || "?")[0].toUpperCase()}</div>
+    .map((s) => {
+      const name = s.name || s.session_id.split("-")[0];
+      return `<div class="contact-item${s.session_id === activeSession ? " active" : ""}" onclick="selectSession('${esc(s.session_id)}','${esc(name)}')">
+      <div class="c-ava">${name[0].toUpperCase()}</div>
       <div style="min-width:0;flex:1">
-        <div class="contact-name">${esc(s.name || s.session_id.split("-")[0])}</div>
-        <div class="contact-preview">${esc((s.last_text || "").substring(0, 40))}</div>
+        <div class="c-name">${esc(name)}</div>
+        <div class="c-prev">${esc((s.last_text || "").substring(0, 36))}</div>
       </div>
-      ${s.unread > 0 ? `<span class="contact-unread">${s.unread}</span>` : ""}
-    </div>`,
-    )
+      ${s.unread > 0 ? `<span class="c-unread">${s.unread}</span>` : ""}
+    </div>`;
+    })
     .join("");
 }
 
-function countUnread(sessionId) {
-  const msgs = liveSessions[sessionId] || [];
-  return msgs.filter((m) => m.sender === "user" && !m._read).length;
-}
-
-// ── Select a live session ─────────────────────────────────────
-async function selectLiveSession(sessionId, name) {
-  activeSessionId = sessionId;
-  stopLivePoll();
-
+async function selectSession(sid, name) {
   document
     .querySelectorAll(".contact-item")
     .forEach((e) => e.classList.remove("active"));
-  const item = document.querySelector(`.contact-item[onclick*="${sessionId}"]`);
-  if (item) item.classList.add("active");
+  document
+    .querySelector(`.contact-item[onclick*="${sid}"]`)
+    ?.classList.add("active");
+  activeSession = sid;
+  setText("chatHdName", name || sid.split("-")[0]);
+  setText("chatHdSub", "Live · " + sid);
+  g("chatHdAva").className = "chat-ava";
+  g("chatHdAva").textContent = (name || "?")[0].toUpperCase();
+  g("adminMsgs").innerHTML = "";
 
-  document.getElementById("chatActiveName").textContent =
-    name || sessionId.split("-")[0];
-  document.getElementById("chatActiveSub").textContent =
-    "Live conversation · " + sessionId;
-
-  const msgs = document.getElementById("adminChatMessages");
-  msgs.innerHTML = "";
-
-  // Load full history
-  await fetchAndRenderSession(sessionId);
-  startLivePoll(sessionId);
-}
-
-async function fetchAndRenderSession(sessionId) {
   try {
-    const r = await fetch(
-      `/api/live-chat?sessionId=${encodeURIComponent(sessionId)}`,
-    );
-    const data = await r.json();
-    if (!data.messages) return;
-
-    // Mark all as read
-    liveSessions[sessionId] = data.messages.map((m) => ({ ...m, _read: true }));
-
-    const msgs = document.getElementById("adminChatMessages");
-    msgs.innerHTML = "";
-    data.messages.forEach((m) => renderAdminChatBubble(m));
+    const d = await api(`/api/live-chat?sessionId=${encodeURIComponent(sid)}`);
+    (d.messages || []).forEach(renderBubble);
   } catch (_) {}
+  showChat();
 }
 
-function renderAdminChatBubble(msg) {
-  const isAdmin = msg.sender === "admin";
-  const msgs = document.getElementById("adminChatMessages");
-  const div = document.createElement("div");
-  div.className = `msg ${isAdmin ? "outgoing" : "incoming"}`;
-  div.dataset.msgId = msg.id;
+/* ── Render a bubble (dedup by data-msg-id) ────────────────── */
+function renderBubble(msg) {
+  const msgs = g("adminMsgs");
+  // ── DOUBLE-BUBBLE FIX: skip if already in DOM ────────────
+  if (msgs.querySelector(`[data-msg-id="${msg.id}"]`)) return;
+
+  const isOut = msg.sender === "admin";
   const time = new Date(msg.timestamp || Date.now()).toLocaleTimeString(
     "en-KE",
     { hour: "2-digit", minute: "2-digit" },
   );
+  const div = document.createElement("div");
+  div.className = `msg ${isOut ? "out" : "in"}`;
+  div.dataset.msgId = msg.id;
   div.innerHTML = `
-    <div class="msg-avatar-sm">${isAdmin ? "A" : (msg.name || "?")[0].toUpperCase()}</div>
-    <div>
+    <div class="msg-ava">${isOut ? "A" : (msg.name || "?")[0].toUpperCase()}</div>
+    <div class="msg-col">
       <div class="msg-bubble">${esc(msg.text)}</div>
-      <div style="font-size:10px;opacity:.35;margin-top:3px;text-align:${isAdmin ? "right" : "left"}">${isAdmin ? "You" : "Client"} · ${time}</div>
+      <div class="msg-time">${isOut ? "You" : "Client"} · ${time}</div>
     </div>`;
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 }
 
-// ── Live poll — check for new client messages every 4s ────────
-function startLivePoll(sessionId) {
-  stopLivePoll();
-  livePollTimer = setInterval(async () => {
-    if (!activeSessionId || activeSessionId === "joy") return;
-    try {
-      const r = await fetch(
-        `/api/live-chat?sessionId=${encodeURIComponent(activeSessionId)}`,
-      );
-      const data = await r.json();
-      if (!data.messages) return;
-
-      const known = new Set(
-        (liveSessions[activeSessionId] || []).map((m) => String(m.id)),
-      );
-      const newMsgs = data.messages.filter((m) => !known.has(String(m.id)));
-
-      if (newMsgs.length) {
-        newMsgs.forEach((m) => {
-          liveSessions[activeSessionId] = liveSessions[activeSessionId] || [];
-          liveSessions[activeSessionId].push({ ...m, _read: true });
-          renderAdminChatBubble(m);
-        });
-      }
-    } catch (_) {}
-  }, 4000);
-}
-
-function stopLivePoll() {
-  if (livePollTimer) {
-    clearInterval(livePollTimer);
-    livePollTimer = null;
-  }
-}
-
-// Refresh sessions list every 15s to pick up new visitors
-function startSessionsRefresh() {
-  if (sessionsLoadTimer) clearInterval(sessionsLoadTimer);
-  sessionsLoadTimer = setInterval(() => {
-    if (adminChatMode === "live") loadLiveSessions();
-  }, 15000);
-}
-
-// ── Send admin reply ──────────────────────────────────────────
-async function sendAdminChat() {
-  const input = document.getElementById("adminChatInput");
+/* ── Send ──────────────────────────────────────────────────── */
+async function sendAdminMsg() {
+  const input = g("adminInput");
   const text = input.value.trim();
   if (!text) return;
   input.value = "";
 
-  if (!activeSessionId || activeSessionId === "joy") {
-    // ── AI Bot mode ────────────────────────────────────────
-    aiConversation.push({ type: "user", text });
-    appendMsg(text, "outgoing", "A");
+  /* ── Joy AI mode ──────────────────────────────────────── */
+  if (activeSession === "joy" || adminChatMode === "bot") {
+    aiConvo.push({ type: "user", text });
+    appendMsg(text, "out", "A");
 
-    const formatted = aiConversation.map((m) => ({
-      role: m.type === "user" ? "user" : "model",
-      parts: [{ text: m.text }],
-    }));
+    // Build context from live data
+    const ctx = `You are Joy, the AI assistant for Joyalty Photography admin dashboard.
+LIVE DATA: Bookings: ${allBookings.length}, Confirmed: ${allBookings.filter((b) => b.status === "confirmed").length}, Pending payment: ${allBookings.filter((b) => b.status === "pending_payment").length}, Revenue collected: KSh ${allBookings.reduce((a, b) => a + Number(b.deposit_paid || 0), 0).toLocaleString()}, Clients: ${allClients.length}.
+Today: ${new Date().toLocaleDateString("en-KE", { dateStyle: "full" })}.
+Be concise, professional and helpful. Use the live data above when answering questions about the business.`;
 
-    const typingEl = document.createElement("div");
-    typingEl.id = "adminTyping";
-    typingEl.className = "msg incoming";
-    typingEl.innerHTML =
-      '<div class="msg-bubble" style="opacity:.45;font-style:italic">Joy is typing…</div>';
-    document.getElementById("adminChatMessages").appendChild(typingEl);
+    const formatted = [
+      { role: "user", parts: [{ text: ctx }] },
+      ...aiConvo
+        .slice(0, -1)
+        .map((m) => ({
+          role: m.type === "user" ? "user" : "model",
+          parts: [{ text: m.text }],
+        })),
+      { role: "user", parts: [{ text }] },
+    ];
+
+    const typing = Object.assign(document.createElement("div"), {
+      className: "typing",
+      id: "adminTyping",
+    });
+    typing.innerHTML = "<span></span><span></span><span></span>";
+    g("adminMsgs").appendChild(typing);
+    g("adminMsgs").scrollTop = 99999;
 
     try {
-      const res = await fetch("/api/gemini-chat", {
+      const res = await api("/api/gemini-chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: formatted }),
       });
-      const data = await res.json().catch(() => ({ reply: "Error" }));
-      typingEl.remove();
-      const reply = data.reply || "Sorry, I could not respond.";
-      aiConversation.push({ type: "bot", text: reply });
-      appendMsg(reply, "incoming", "🤖");
+      typing.remove();
+      const reply = res.reply || "I couldn't respond right now.";
+      aiConvo.push({ type: "bot", text: reply });
+      appendMsg(reply, "in", "🤖");
     } catch (_) {
-      typingEl.remove();
-      appendMsg("Connection error.", "incoming", "⚠");
+      typing.remove();
+      appendMsg("Connection error.", "in", "⚠");
     }
     return;
   }
 
-  // ── Live Chat reply ────────────────────────────────────────
-  const msg = {
-    sessionId: activeSessionId,
+  /* ── Live chat reply ───────────────────────────────────── */
+  if (!activeSession) return;
+
+  // Render optimistically with a temp ID — will be replaced with real DB id
+  const tempId = "tmp-" + Date.now();
+  const tempMsg = {
+    id: tempId,
     sender: "admin",
     name: "Admin",
     text,
     timestamp: new Date().toISOString(),
   };
-
-  // Optimistically render
-  renderAdminChatBubble({ ...msg, id: Date.now() });
+  renderBubble(tempMsg);
+  sentIds.add(tempId);
 
   try {
-    await fetch("/api/live-chat", {
+    const res = await api("/api/live-chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(msg),
+      body: JSON.stringify({
+        sessionId: activeSession,
+        sender: "admin",
+        name: "Admin",
+        text,
+        timestamp: tempMsg.timestamp,
+      }),
     });
-    // Store locally
-    liveSessions[activeSessionId] = liveSessions[activeSessionId] || [];
-    liveSessions[activeSessionId].push({ ...msg, id: Date.now(), _read: true });
+    // When DB returns the real ID, update data-msg-id to prevent Realtime re-rendering
+    if (res.id) {
+      sentIds.add(String(res.id));
+      const el = g("adminMsgs").querySelector(`[data-msg-id="${tempId}"]`);
+      if (el) el.dataset.msgId = res.id;
+    }
   } catch (_) {
-    appendMsg("⚠ Message failed to send.", "incoming", "⚠");
+    appendMsg("⚠ Send failed.", "in", "⚠");
   }
 }
 
-// ── Generic message appender (for bot mode) ───────────────────
-function appendMsg(text, dir, avatarChar) {
-  const msgs = document.getElementById("adminChatMessages");
+/* Generic append (AI mode, no ID needed) */
+function appendMsg(text, dir, ava) {
+  const msgs = g("adminMsgs");
+  const time = new Date().toLocaleTimeString("en-KE", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
   const div = document.createElement("div");
   div.className = `msg ${dir}`;
-  div.innerHTML = `
-    <div class="msg-avatar-sm">${avatarChar || (dir === "outgoing" ? "A" : "?")}</div>
-    <div class="msg-bubble">${esc(text)}</div>`;
+  div.innerHTML = `<div class="msg-ava">${ava || (dir === "out" ? "A" : "?")}</div><div class="msg-col"><div class="msg-bubble">${esc(text)}</div><div class="msg-time">${time}</div></div>`;
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 }
 
-// ── Charts ────────────────────────────────────────────────────
-let charts = {};
+function clearChat() {
+  aiConvo = [];
+  g("adminMsgs").innerHTML = "";
+  if (adminChatMode === "bot")
+    appendMsg("Chat cleared. Ask me anything.", "in", "🤖");
+}
 
+/* Mobile chat panel navigation */
+function showChat() {
+  if (window.innerWidth <= 768) {
+    g("chatContacts")?.classList.add("hidden");
+    g("chatMain")?.classList.remove("hidden");
+  }
+}
+function showContacts() {
+  if (window.innerWidth <= 768) {
+    g("chatContacts")?.classList.remove("hidden");
+    g("chatMain")?.classList.add("hidden");
+  }
+}
+
+function updateBadges() {
+  ["chatBadgeSB", "bnChat"].forEach((id) => {
+    const el = g(id);
+    if (!el) return;
+    el.textContent = unread > 0 ? unread : "!";
+    el.style.display = unread > 0 ? "" : "none";
+  });
+}
+function resetUnread() {
+  unread = 0;
+  updateBadges();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PUSH NOTIFICATIONS
+// ═══════════════════════════════════════════════════════════════
+async function requestNotifPerm() {
+  if (!("Notification" in window)) {
+    toast("Not supported in this browser.", "error");
+    return;
+  }
+  const p = await Notification.requestPermission();
+  if (p === "granted") {
+    toast("Notifications enabled ✓", "success");
+    g("notifDot").style.display = "";
+    g("pushToggle").checked = true;
+    savePref("pushEnabled", true);
+    prefs.pushEnabled = true;
+    setText("notifStatus", "Push notifications are enabled.");
+  } else {
+    toast("Permission denied.", "error");
+    setText("notifStatus", "Please enable in browser settings.");
+  }
+}
+function togglePush(on) {
+  if (on) requestNotifPerm();
+  else {
+    savePref("pushEnabled", false);
+    prefs.pushEnabled = false;
+    setText("notifStatus", "Disabled.");
+  }
+}
+function pushNotif(title, body) {
+  if (!prefs.pushEnabled || Notification.permission !== "granted") return;
+  try {
+    new Notification(title, { body, icon: "/admin/icons/icon-192.png" });
+  } catch (_) {}
+}
+function beep() {
+  try {
+    const c = new (window.AudioContext || window.webkitAudioContext)(),
+      o = c.createOscillator(),
+      g2 = c.createGain();
+    o.connect(g2);
+    g2.connect(c.destination);
+    o.frequency.setValueAtTime(880, c.currentTime);
+    o.frequency.exponentialRampToValueAtTime(440, c.currentTime + 0.15);
+    g2.gain.setValueAtTime(0.28, c.currentTime);
+    g2.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.3);
+    o.start();
+    o.stop(c.currentTime + 0.3);
+  } catch (_) {}
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PROFILE
+// ═══════════════════════════════════════════════════════════════
+function previewAva(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) {
+    toast("Max 2 MB.", "error");
+    return;
+  }
+  const r = new FileReader();
+  r.onload = (e) => {
+    setAva(e.target.result);
+    localStorage.setItem("adminAva", e.target.result);
+  };
+  r.readAsDataURL(file);
+}
+function setAva(src) {
+  ["avaPreview", "sbAvatar"].forEach((id) => {
+    const el = g(id);
+    if (el)
+      el.innerHTML = `<img src="${src}" alt="Avatar" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;
+  });
+}
+function saveProfile() {
+  const name = getVal("profileName"),
+    studio = getVal("profileStudio"),
+    phone = getVal("profilePhone");
+  if (name) {
+    localStorage.setItem("adminDisplayName", name);
+    setText("sbName", name);
+  }
+  if (studio) localStorage.setItem("adminStudio", studio);
+  if (phone) localStorage.setItem("adminPhone", phone);
+  toast("Profile saved.", "success");
+}
+async function changePassword() {
+  const np = getVal("newPw"),
+    cp = getVal("confirmPw");
+  if (!np || np.length < 8) {
+    showAlert("pwAlert", "Minimum 8 characters.", "error");
+    return;
+  }
+  if (np !== cp) {
+    showAlert("pwAlert", "Passwords do not match.", "error");
+    return;
+  }
+  try {
+    await firebase.auth().currentUser?.updatePassword(np);
+    showAlert("pwAlert", "Password updated.", "success");
+    setVal("newPw", "");
+    setVal("confirmPw", "");
+  } catch (e) {
+    showAlert("pwAlert", e.message, "error");
+  }
+}
+function loadPrefs() {
+  try {
+    return JSON.parse(localStorage.getItem("adminPrefs") || "{}");
+  } catch (_) {
+    return {};
+  }
+}
+function savePref(k, v) {
+  prefs[k] = v;
+  localStorage.setItem("adminPrefs", JSON.stringify(prefs));
+}
+function loadPrefsUI() {
+  const pt = g("pushToggle"),
+    cn = g("chatNotifToggle"),
+    sn = g("soundToggle");
+  if (pt) pt.checked = !!prefs.pushEnabled;
+  if (cn) cn.checked = prefs.chatNotif !== false;
+  if (sn) sn.checked = !!prefs.soundNotif;
+  const granted = Notification.permission === "granted";
+  setText(
+    "notifStatus",
+    granted && prefs.pushEnabled
+      ? "Notifications are enabled."
+      : "Click 🔔 in the topbar to enable.",
+  );
+  if (granted && prefs.pushEnabled) {
+    const d = g("notifDot");
+    if (d) d.style.display = "";
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CHARTS
+// ═══════════════════════════════════════════════════════════════
+let charts = {};
 function renderOverviewCharts() {
-  const months = [
+  const mo = [
     "Jan",
     "Feb",
     "Mar",
@@ -763,62 +895,51 @@ function renderOverviewCharts() {
     "Dec",
   ];
   const now = new Date().getMonth();
-  const labels = months.slice(Math.max(0, now - 5), now + 1);
-  const bkData = [2, 5, 3, 8, 6, allBookings.length || 1];
-  const revData = [
-    45e3,
-    90e3,
-    60e3,
-    160e3,
-    120e3,
-    allBookings.reduce((a, b) => a + Number(b.deposit_paid || 0), 0) || 45e3,
-  ];
+  const labels = mo.slice(Math.max(0, now - 5), now + 1);
 
-  _dc("bookingsChart");
-  charts.bookings = new Chart(document.getElementById("bookingsChart"), {
+  dc("bookingsChart");
+  charts.bk = new Chart(g("bookingsChart"), {
     type: "bar",
     data: {
       labels,
       datasets: [
         {
           label: "Bookings",
-          data: bkData,
-          backgroundColor: "rgba(108,99,255,.5)",
-          borderColor: "#6c63ff",
+          data: [2, 5, 3, 8, 6, allBookings.length || 1],
+          backgroundColor: "rgba(212,168,75,.32)",
+          borderColor: "#d4a84b",
           borderWidth: 1.5,
-          borderRadius: 4,
+          borderRadius: 5,
         },
       ],
     },
-    options: _chartOpts(),
+    options: cOpts(),
   });
 
-  const svcCounts = {};
+  const sc = {};
   allBookings.forEach((b) => {
     const s = b.service_name || "Other";
-    svcCounts[s] = (svcCounts[s] || 0) + 1;
+    sc[s] = (sc[s] || 0) + 1;
   });
-  const svcLabels = Object.keys(svcCounts).length
-    ? Object.keys(svcCounts)
+  const sl = Object.keys(sc).length
+    ? Object.keys(sc)
     : ["Wedding", "Portrait", "Commercial", "Event"];
-  const svcData = Object.keys(svcCounts).length
-    ? Object.values(svcCounts)
-    : [4, 3, 2, 2];
-  _dc("servicesChart");
-  charts.services = new Chart(document.getElementById("servicesChart"), {
+  const sd = Object.keys(sc).length ? Object.values(sc) : [4, 3, 2, 2];
+  dc("servicesChart");
+  charts.svc = new Chart(g("servicesChart"), {
     type: "doughnut",
     data: {
-      labels: svcLabels,
+      labels: sl,
       datasets: [
         {
-          data: svcData,
+          data: sd,
           backgroundColor: [
-            "#6c63ff",
+            "#d4a84b",
+            "#7c6ef0",
             "#22c55e",
-            "#f59e0b",
             "#ef4444",
-            "#a78bfa",
-            "#34d399",
+            "#f59e0b",
+            "#06b6d4",
           ],
           borderWidth: 0,
         },
@@ -828,21 +949,29 @@ function renderOverviewCharts() {
       plugins: {
         legend: {
           position: "bottom",
-          labels: { color: "#8892a4", font: { size: 11 }, padding: 12 },
+          labels: { color: "#8892a4", font: { size: 11 }, padding: 9 },
         },
       },
     },
   });
 
-  _dc("revenueChart");
-  charts.revenue = new Chart(document.getElementById("revenueChart"), {
+  const rv = [
+    45e3,
+    90e3,
+    60e3,
+    160e3,
+    120e3,
+    allBookings.reduce((a, b) => a + Number(b.deposit_paid || 0), 0) || 45e3,
+  ];
+  dc("revenueChart");
+  charts.rv = new Chart(g("revenueChart"), {
     type: "line",
     data: {
       labels,
       datasets: [
         {
-          label: "Revenue (KSh)",
-          data: revData,
+          label: "Revenue",
+          data: rv,
           borderColor: "#22c55e",
           backgroundColor: "rgba(34,197,94,.08)",
           fill: true,
@@ -852,7 +981,7 @@ function renderOverviewCharts() {
         },
       ],
     },
-    options: _chartOpts({ yTick: (v) => `${(v / 1000).toFixed(0)}K` }),
+    options: cOpts({ yTick: (v) => `${(v / 1000).toFixed(0)}K` }),
   });
 }
 
@@ -861,15 +990,15 @@ function renderAnalytics() {
   allBookings.forEach((b) => {
     if (sc[b.status] !== undefined) sc[b.status]++;
   });
-  _dc("statusChart");
-  charts.status = new Chart(document.getElementById("statusChart"), {
+  dc("statusChart");
+  charts.st = new Chart(g("statusChart"), {
     type: "pie",
     data: {
       labels: Object.keys(sc),
       datasets: [
         {
           data: Object.values(sc),
-          backgroundColor: ["#f59e0b", "#22c55e", "#ef4444", "#6c63ff"],
+          backgroundColor: ["#f59e0b", "#22c55e", "#ef4444", "#d4a84b"],
           borderWidth: 0,
         },
       ],
@@ -883,8 +1012,8 @@ function renderAnalytics() {
       },
     },
   });
-  _dc("paymentChart");
-  charts.payment = new Chart(document.getElementById("paymentChart"), {
+  dc("paymentChart");
+  charts.pm = new Chart(g("paymentChart"), {
     type: "doughnut",
     data: {
       labels: ["M-Pesa", "Pending"],
@@ -914,82 +1043,164 @@ function renderAnalytics() {
     d.setDate(d.getDate() - 29 + i);
     return d.toLocaleDateString("en-KE", { month: "short", day: "numeric" });
   });
-  const dailyData = days.map((_, i) =>
-    i === 29 ? 45e3 : i === 28 ? 30e3 : i === 25 ? 18e3 : 0,
-  );
-  _dc("dailyRevenueChart");
-  charts.daily = new Chart(document.getElementById("dailyRevenueChart"), {
+  dc("dailyChart");
+  charts.dr = new Chart(g("dailyChart"), {
     type: "bar",
     data: {
       labels: days,
       datasets: [
         {
           label: "Revenue",
-          data: dailyData,
-          backgroundColor: "rgba(108,99,255,.4)",
-          borderColor: "#6c63ff",
+          data: days.map((_, i) =>
+            i === 29 ? 45e3 : i === 28 ? 30e3 : i === 25 ? 18e3 : 0,
+          ),
+          backgroundColor: "rgba(212,168,75,.32)",
+          borderColor: "#d4a84b",
           borderWidth: 1.5,
           borderRadius: 2,
         },
       ],
     },
-    options: _chartOpts({
-      xLimit: 8,
-      yTick: (v) => `${(v / 1000).toFixed(0)}K`,
-    }),
+    options: cOpts({ xLimit: 8, yTick: (v) => `${(v / 1000).toFixed(0)}K` }),
   });
 }
 
-function _chartOpts(opts = {}) {
+function cOpts(o = {}) {
   return {
     plugins: { legend: { display: false } },
     scales: {
       y: {
         beginAtZero: true,
         grid: { color: "rgba(255,255,255,.04)" },
-        ticks: opts.yTick ? { callback: opts.yTick } : {},
+        ticks: o.yTick ? { callback: o.yTick } : {},
+        border: { display: false },
       },
       x: {
         grid: { display: false },
-        ticks: opts.xLimit ? { maxTicksLimit: opts.xLimit } : {},
+        ticks: o.xLimit ? { maxTicksLimit: o.xLimit } : {},
+        border: { display: false },
       },
     },
   };
 }
-function _dc(id) {
+function dc(id) {
   const c = Chart.getChart(id);
   if (c) c.destroy();
 }
 
-// ── Modals ────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// MOBILE NAV
+// ═══════════════════════════════════════════════════════════════
+function toggleSidebar() {
+  const sb = g("sidebar"),
+    open = sb.classList.toggle("open");
+  g("sbOverlay")?.classList.toggle("open", open);
+}
+function closeSidebar() {
+  g("sidebar")?.classList.remove("open");
+  g("sbOverlay")?.classList.remove("open");
+}
+function openMore() {
+  g("moreSheet")?.classList.add("open");
+  g("sheetOverlay")?.classList.add("open");
+}
+function closeMore() {
+  g("moreSheet")?.classList.remove("open");
+  g("sheetOverlay")?.classList.remove("open");
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MODALS / ALERTS / TOASTS
+// ═══════════════════════════════════════════════════════════════
 function openModal(id) {
-  document.getElementById(id).classList.add("open");
+  g(id)?.classList.add("open");
 }
 function closeModal(id) {
-  document.getElementById(id).classList.remove("open");
+  g(id)?.classList.remove("open");
 }
-document.querySelectorAll(".admin-modal-backdrop").forEach((el) => {
+document.querySelectorAll(".modal-wrap").forEach((el) => {
   el.addEventListener("click", (e) => {
     if (e.target === el) el.classList.remove("open");
   });
 });
 
-// ── Alerts ────────────────────────────────────────────────────
+function toast(msg, type = "info") {
+  const icons = {
+    success: "fa-circle-check",
+    error: "fa-triangle-exclamation",
+    info: "fa-bell",
+  };
+  const t = document.createElement("div");
+  t.className = `toast ${type}`;
+  t.innerHTML = `<i class="fa-solid ${icons[type] || icons.info}"></i>${esc(msg)}`;
+  g("toastWrap")?.appendChild(t);
+  setTimeout(() => {
+    t.style.animation = "toastOut .25s ease forwards";
+    setTimeout(() => t.remove(), 260);
+  }, 3400);
+}
+
 function showAlert(id, msg, type) {
-  const el = document.getElementById(id);
+  const el = g(id);
   if (!el) return;
   el.textContent = msg;
-  el.className = `admin-alert ${type}`;
-  el.style.display = "block";
+  el.className = `alert ${type}`;
   setTimeout(() => {
+    el.className = "alert";
     el.style.display = "none";
   }, 5000);
 }
 
-// ── Helpers ───────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════
+async function api(url, opts = {}) {
+  const r = await fetch(url, {
+    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+    ...opts,
+  });
+  const t = await r.text();
+  try {
+    return JSON.parse(t);
+  } catch (_) {
+    return { error: t };
+  }
+}
 function esc(s) {
   return String(s || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+function g(id) {
+  return document.getElementById(id);
+}
+function setText(id, v) {
+  const el = g(id);
+  if (el) el.textContent = v;
+}
+function setVal(id, v) {
+  const el = g(id);
+  if (el) el.value = v;
+}
+function getVal(id) {
+  const el = g(id);
+  return el ? el.value.trim() : "";
+}
+function setIdx(id, i) {
+  const el = g(id);
+  if (el) el.selectedIndex = i;
+}
+function set(id, prop, v) {
+  const el = g(id);
+  if (el) el.style[prop] = v;
+}
+function ls(k) {
+  return localStorage.getItem(k) || "";
+}
+function showErr(el, msg) {
+  if (el) {
+    el.textContent = msg;
+    el.style.display = "block";
+  }
 }
