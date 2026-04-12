@@ -1,91 +1,137 @@
 // functions/api/admin/bookings.js
+// GET all, PUT update, DELETE — admin CRUD
+// ✅ Self-contained — no _shared imports
 
- import { getSupabase } from "./_shared/supabase-client.js";
-const sb = getSupabase(env);
-const { data: rows, error } = await sb.from("bookings").select("*").eq("id", id);
- 
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+function getSB(env) {
+  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
+    auth: { persistSession: false },
+  });
+}
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
+  });
+}
+
+// GET /api/admin/bookings — full list with joins
 export async function onRequestGet(context) {
-  var env = context.env;
-  if (!env.DATABASE_URL) { return j({ error: "DATABASE_URL not set" }, 500); }
-  try {
-    var sql  = neon(env.DATABASE_URL);
-    var rows = await sql`
-      SELECT b.id, b.booking_ref, b.status, b.event_date, b.event_time,
-             b.event_location, b.total_price, b.deposit_amount, b.created_at,
-             c.name  AS client_name,
-             c.email AS client_email,
-             c.phone AS client_phone,
-             s.name  AS service_name,
-             p.name  AS package_name,
-             e.name  AS extra_name,
-             r.receipt_ref, r.deposit_paid, r.balance_due, r.payment_ref
-      FROM bookings b
-      LEFT JOIN clients      c ON c.id = b.client_id
-      LEFT JOIN services     s ON s.id = b.service_id
-      LEFT JOIN packages     p ON p.id = b.package_id
-      LEFT JOIN extra_services e ON e.id = b.extra_service_id
-      LEFT JOIN receipts     r ON r.booking_id = b.id
-      WHERE NOT (b.status = 'pending_payment' AND b.created_at < NOW() - INTERVAL '24 hours')
-      ORDER BY b.created_at DESC
-    `;
-    return j({ bookings: rows });
-  } catch (err) {
-    return j({ error: err.message }, 500);
-  }
+  const { env } = context;
+  if (!env.SUPABASE_URL) return json({ error: "SUPABASE_URL not configured" }, 500);
+  const sb = getSB(env);
+
+  const { data, error } = await sb
+    .from("bookings")
+    .select(`
+      id, booking_ref, status, event_date, event_time,
+      event_location, event_description, total_price, deposit_amount,
+      base_price, package_price, extra_price, created_at, updated_at,
+      clients   ( name, email, phone ),
+      services  ( name ),
+      packages  ( name ),
+      extra_services ( name ),
+      receipts  ( receipt_ref, deposit_paid, balance_due, payment_ref )
+    `)
+    .not("status", "eq", "pending_payment")
+    .order("created_at", { ascending: false });
+
+  // Also include pending_payment bookings created within the last 24h
+  const { data: pending } = await sb
+    .from("bookings")
+    .select(`
+      id, booking_ref, status, event_date, event_time,
+      event_location, event_description, total_price, deposit_amount,
+      base_price, package_price, extra_price, created_at, updated_at,
+      clients   ( name, email, phone ),
+      services  ( name ),
+      packages  ( name ),
+      extra_services ( name ),
+      receipts  ( receipt_ref, deposit_paid, balance_due, payment_ref )
+    `)
+    .eq("status", "pending_payment")
+    .gte("created_at", new Date(Date.now() - 86400000).toISOString());
+
+  if (error) return json({ error: error.message }, 500);
+
+  const all = [...(data || []), ...(pending || [])].map(b => ({
+    id:                b.id,
+    booking_ref:       b.booking_ref,
+    status:            b.status,
+    event_date:        b.event_date,
+    event_time:        b.event_time,
+    event_location:    b.event_location,
+    event_description: b.event_description,
+    total_price:       b.total_price,
+    deposit_amount:    b.deposit_amount,
+    created_at:        b.created_at,
+    client_name:       b.clients?.name,
+    client_email:      b.clients?.email,
+    client_phone:      b.clients?.phone,
+    service_name:      b.services?.name,
+    package_name:      b.packages?.name,
+    extra_name:        b.extra_services?.name,
+    receipt_ref:       b.receipts?.receipt_ref,
+    deposit_paid:      b.receipts?.deposit_paid,
+    balance_due:       b.receipts?.balance_due,
+    payment_ref:       b.receipts?.payment_ref,
+  }));
+
+  // Sort by created_at desc
+  all.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  return json({ bookings: all });
 }
 
+// PUT /api/admin/bookings/:id — update status / details
 export async function onRequestPut(context) {
-  var request = context.request;
-  var env     = context.env;
-  var id      = new URL(request.url).pathname.split("/").filter(Boolean).pop();
-  if (!id || isNaN(id)) { return j({ error: "Invalid booking ID" }, 400); }
-  if (!env.DATABASE_URL) { return j({ error: "DATABASE_URL not set" }, 500); }
-  var body;
-  try { body = await request.json(); } catch(e) { return j({ error: "Invalid JSON" }, 400); }
-  try {
-    var sql = neon(env.DATABASE_URL);
-    await sql`
-      UPDATE bookings
-      SET
-        status            = COALESCE(${body.status || null},           status),
-        event_date        = COALESCE(${body.eventDate || null},        event_date),
-        event_location    = COALESCE(${body.eventLocation || null},    event_location),
-        event_description = COALESCE(${body.eventDescription || null}, event_description),
-        updated_at        = NOW()
-      WHERE id = ${id}
-    `;
-    return j({ success: true });
-  } catch (err) { return j({ error: err.message }, 500); }
+  const { request, env } = context;
+  const id = new URL(request.url).pathname.split("/").filter(Boolean).pop();
+  if (!id || isNaN(id)) return json({ error: "Invalid booking ID" }, 400);
+  if (!env.SUPABASE_URL) return json({ error: "SUPABASE_URL not configured" }, 500);
+
+  let body;
+  try { body = await request.json(); }
+  catch (_) { return json({ error: "Invalid JSON" }, 400); }
+
+  const sb = getSB(env);
+  const updates = {};
+  if (body.status)           updates.status            = body.status;
+  if (body.eventDate)        updates.event_date         = body.eventDate;
+  if (body.eventLocation)    updates.event_location     = body.eventLocation;
+  if (body.eventDescription) updates.event_description  = body.eventDescription;
+  updates.updated_at = new Date().toISOString();
+
+  const { error } = await sb.from("bookings").update(updates).eq("id", id);
+  if (error) return json({ error: error.message }, 500);
+  return json({ success: true });
 }
 
+// DELETE /api/admin/bookings/:id
 export async function onRequestDelete(context) {
-  var request = context.request;
-  var env     = context.env;
-  var id      = new URL(request.url).pathname.split("/").filter(Boolean).pop();
-  if (!id || isNaN(id)) { return j({ error: "Invalid booking ID" }, 400); }
-  if (!env.DATABASE_URL) { return j({ error: "DATABASE_URL not set" }, 500); }
-  try {
-    var sql  = neon(env.DATABASE_URL);
-    // CASCADE deletes payments + receipts (requires schema-update.sql to be run)
-    var rows = await sql`DELETE FROM bookings WHERE id = ${id} RETURNING id`;
-    if (!rows || !rows.length) { return j({ error: "Booking not found" }, 404); }
-    return j({ success: true });
-  } catch (err) { return j({ error: err.message }, 500); }
+  const { request, env } = context;
+  const id = new URL(request.url).pathname.split("/").filter(Boolean).pop();
+  if (!id || isNaN(id)) return json({ error: "Invalid booking ID" }, 400);
+  if (!env.SUPABASE_URL) return json({ error: "SUPABASE_URL not configured" }, 500);
+
+  const sb = getSB(env);
+  const { error } = await sb.from("bookings").delete().eq("id", id);
+  if (error) return json({ error: error.message }, 500);
+  return json({ success: true });
 }
 
 export async function onRequestOptions() {
-  return new Response(null, { headers: cors() });
-}
-
-function j(data, status) {
-  if (!status) { status = 200; }
-  return new Response(JSON.stringify(data), { status: status, headers: cors() });
-}
-function cors() {
-  return {
-    "Content-Type":                "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type"
-  };
+  return new Response(null, {
+    headers: {
+      "Access-Control-Allow-Origin":  "*",
+      "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
+  });
 }

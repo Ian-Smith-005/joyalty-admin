@@ -1,65 +1,60 @@
 // functions/api/live-chat/sessions.js
-// GET — returns all unique sessions for the admin contact list
-// Cloudflare Pages function — no Express, plain Response
+// GET — all unique sessions for admin contact list
+// ✅ Self-contained — no _shared imports
 
- import { getSupabase } from "./_shared/supabase-client.js";
-const sb = getSupabase(env);
-const { data: rows, error } = await sb.from("bookings").select("*").eq("id", id);
- 
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+function getSB(env) {
+  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
+    auth: { persistSession: false },
+  });
+}
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+  });
+}
 
 export async function onRequestGet(context) {
-  var env = context.env;
+  const { env } = context;
+  if (!env.SUPABASE_URL) return json({ sessions: [] });
 
-  if (!env.DATABASE_URL) {
-    return jsonRes({ sessions: [] });
+  const sb = getSB(env);
+
+  // One row per session: latest message + unread count
+  const { data, error } = await sb.rpc("get_live_chat_sessions");
+
+  if (error) {
+    // Fallback: manual query if RPC not yet created
+    const { data: rows, error: qErr } = await sb
+      .from("live_chat_messages")
+      .select("session_id, name, text, timestamp, sender, read")
+      .order("timestamp", { ascending: false });
+
+    if (qErr) return json({ sessions: [], error: qErr.message });
+
+    // Group by session_id in JS
+    const map = {};
+    for (const row of rows || []) {
+      if (!map[row.session_id]) {
+        map[row.session_id] = {
+          session_id: row.session_id,
+          name:       row.name || row.session_id.split("-")[0],
+          last_text:  row.text,
+          last_at:    row.timestamp,
+          unread:     0,
+        };
+      }
+      if (row.sender === "user" && !row.read) {
+        map[row.session_id].unread++;
+      }
+    }
+
+    return json({ sessions: Object.values(map) });
   }
 
-  try {
-    var sql  = neon(env.DATABASE_URL);
-
-    // Auto-create table if it doesn't exist yet
-    await sql`
-      CREATE TABLE IF NOT EXISTS live_chat_messages (
-        id         SERIAL PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        sender     TEXT NOT NULL,
-        name       TEXT,
-        text       TEXT NOT NULL,
-        timestamp  TIMESTAMPTZ DEFAULT NOW(),
-        read       BOOLEAN DEFAULT false
-      )
-    `;
-
-    // Get one row per session: latest message text + unread count
-    var rows = await sql`
-      SELECT
-        session_id,
-        MAX(name)  FILTER (WHERE sender = 'user') AS name,
-        (ARRAY_AGG(text ORDER BY timestamp DESC))[1] AS last_text,
-        MAX(timestamp)                                AS last_at,
-        COUNT(*) FILTER (WHERE sender = 'user' AND read = false) AS unread
-      FROM live_chat_messages
-      GROUP BY session_id
-      ORDER BY MAX(timestamp) DESC
-      LIMIT 100
-    `;
-
-    var sessions = rows.map(function(r) {
-      return {
-        session_id: r.session_id,
-        name:       r.name || r.session_id.split("-")[0],
-        last_text:  r.last_text || "",
-        last_at:    r.last_at,
-        unread:     Number(r.unread || 0),
-      };
-    });
-
-    return jsonRes({ sessions: sessions });
-
-  } catch (err) {
-    console.error("[live-chat/sessions]", err.message);
-    return jsonRes({ sessions: [], error: err.message });
-  }
+  return json({ sessions: data || [] });
 }
 
 export async function onRequestOptions() {
@@ -67,18 +62,7 @@ export async function onRequestOptions() {
     headers: {
       "Access-Control-Allow-Origin":  "*",
       "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type"
-    }
-  });
-}
-
-function jsonRes(data, status) {
-  if (!status) { status = 200; }
-  return new Response(JSON.stringify(data), {
-    status: status,
-    headers: {
-      "Content-Type":                "application/json",
-      "Access-Control-Allow-Origin": "*"
-    }
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
   });
 }

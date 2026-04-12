@@ -1,28 +1,38 @@
 // functions/api/admin/clients.js
- import { getSupabase } from "./_shared/supabase-client.js";
-const sb = getSupabase(env);
-const { data: rows, error } = await sb.from("bookings").select("*").eq("id", id);
- 
+// ✅ Self-contained — no _shared imports
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+function getSB(env) {
+  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
+    auth: { persistSession: false },
+  });
+}
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+  });
+}
+
 export async function onRequestGet(context) {
-  var env = context.env;
-  if (!env.DATABASE_URL) { return j({ error: "DATABASE_URL not set" }, 500); }
-  try {
-    var sql  = neon(env.DATABASE_URL);
-    var rows = await sql`SELECT * FROM clients ORDER BY created_at DESC`;
-    return j({ clients: rows });
-  } catch (err) {
-    return j({ error: err.message }, 500);
-  }
+  const { env } = context;
+  if (!env.SUPABASE_URL) return json({ error: "SUPABASE_URL not configured" }, 500);
+  const sb = getSB(env);
+  const { data, error } = await sb
+    .from("clients")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) return json({ error: error.message }, 500);
+  return json({ clients: data });
 }
 
 export async function onRequestOptions() {
-  return new Response(null, { headers: cors() });
-}
-
-function j(data, status) {
-  if (!status) { status = 200; }
-  return new Response(JSON.stringify(data), { status: status, headers: cors() });
-}
-function cors() {
-  return { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+  return new Response(null, {
+    headers: {
+      "Access-Control-Allow-Origin":  "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
+  });
 }

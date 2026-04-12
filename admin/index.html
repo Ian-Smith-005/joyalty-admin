@@ -318,5 +318,12 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
 <script src="assets/admin.js"></script>
+<script>
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/admin/sw.js", { scope: "/admin/" })
+      .then(reg => console.log("[SW] registered:", reg.scope))
+      .catch(err => console.error("[SW] error:", err));
+  }
+</script>
 </body>
 </html>
