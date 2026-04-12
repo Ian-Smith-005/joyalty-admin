@@ -2,9 +2,11 @@
   "name": "joyalty-admin",
   "version": "1.0.0",
   "type": "module",
-  "scripts": { "build": "echo 'No build step'" },
+  "scripts": {
+    "build": "echo 'No build step'"
+  },
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.0",
+    "@supabase/supabase-js": "^2.103.0",
     "resend": "^4.0.0"
   }
 }
