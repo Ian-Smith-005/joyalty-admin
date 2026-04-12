@@ -8,4 +8,3 @@ Thumbs.db
 .env
 node_modules/
 claude.md
-wrangler.toml
