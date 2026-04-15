@@ -1,64 +1,70 @@
 /* ============================================================
-   JOYALTY ADMIN — admin.js  (complete)
-   ✓ Firebase auth — no login flash on refresh
-   ✓ Tab memory via sessionStorage
-   ✓ Supabase Realtime — live chat push (no polling)
-   ✓ Joy AI — Gemini with live dashboard context
-   ✓ Double-bubble fix — sentIds Set + data-msg-id dedup
-   ✓ Push notifications (Web Push API)
-   ✓ Profile editor with avatar preview
-   ✓ Bottom nav + More sheet for mobile
-   ✓ Full CRUD on bookings
+   JOYALTY ADMIN — admin.js
+   ✓ Supabase URL loaded from /api/config (awaits __configReady)
+   ✓ Firebase auth persists — no login flash on refresh
+   ✓ Tab memory (sessionStorage)
+   ✓ Supabase Realtime live chat
+   ✓ Joy AI with live data context
+   ✓ Double-bubble fix (data-msg-id dedup + sentIds)
+   ✓ Push notifications + sound
+   ✓ Profile editor + avatar
+   ✓ Full CRUD bookings
 ============================================================ */
 
-// ── Supabase realtime client (browser, anon key) ──────────────
-// Set window.SUPABASE_URL and window.SUPABASE_ANON in a <script>
-// before this file loads (see index.html), or set them here:
-const SB_URL = window.SUPABASE_URL || "https://YOUR_PROJECT.supabase.co";
-const SB_ANON = window.SUPABASE_ANON || "YOUR_ANON_KEY";
-const sbClient = supabase.createClient(SB_URL, SB_ANON);
+// ── Wait for Supabase config to be ready (set by index.html) ─
+// admin.js is loaded dynamically only AFTER window.__configReady resolves,
+// so SUPABASE_URL and SUPABASE_ANON are guaranteed to be set here.
+
+const SB_URL = window.SUPABASE_URL || "";
+const SB_ANON = window.SUPABASE_ANON || "";
+
+// Only create Supabase client if we have valid config
+let sbClient = null;
+if (SB_URL && SB_ANON && SB_URL !== "https://YOUR_PROJECT.supabase.co") {
+  try {
+    sbClient = supabase.createClient(SB_URL, SB_ANON);
+    console.log("[admin] Supabase client ready:", SB_URL);
+  } catch (e) {
+    console.error("[admin] Supabase init failed:", e.message);
+  }
+} else {
+  console.warn(
+    "[admin] Supabase URL not configured — realtime disabled. Set SUPABASE_URL and SUPABASE_ANON_KEY in Cloudflare env vars.",
+  );
+}
 
 // ── State ──────────────────────────────────────────────────────
 let currentUser = null;
 let allBookings = [];
 let allClients = [];
-let adminChatMode = "bot";
+let chatMode = "bot";
 let aiConvo = [];
-let activeSession = null; // "joy" | sessionId string
-let sentIds = new Set(); // dedup outgoing bubbles
+let activeSession = null;
+let sentIds = new Set();
 let rtChannel = null;
 let unread = 0;
 let prefs = loadPrefs();
-let editBookingId = null;
+let editId = null;
 
 // ═══════════════════════════════════════════════════════════════
 // SUPABASE REALTIME
 // ═══════════════════════════════════════════════════════════════
 function subscribeRealtime() {
+  if (!sbClient) return;
   if (rtChannel) sbClient.removeChannel(rtChannel);
   rtChannel = sbClient
     .channel("admin-live-chat")
     .on(
       "postgres_changes",
-      {
-        event: "INSERT",
-        schema: "public",
-        table: "live_chat_messages",
-      },
+      { event: "INSERT", schema: "public", table: "live_chat_messages" },
       (payload) => {
         const msg = payload.new;
         if (!msg) return;
-        // Skip our own admin messages already rendered optimistically
         if (msg.sender === "admin" && sentIds.has(String(msg.id))) return;
-
-        // Cache message
-        if (!liveCache[msg.session_id]) liveCache[msg.session_id] = [];
-        liveCache[msg.session_id].push(msg);
 
         if (msg.session_id === activeSession) {
           renderBubble(msg);
         } else {
-          // New message in another session
           unread++;
           updateBadges();
           loadSessions();
@@ -69,18 +75,20 @@ function subscribeRealtime() {
         }
       },
     )
-    .subscribe();
+    .subscribe((status) => {
+      console.log("[realtime] status:", status);
+    });
 }
 
-const liveCache = {};
-
 // ═══════════════════════════════════════════════════════════════
-// AUTH
+// AUTH — Firebase persistence prevents login flash on refresh
 // ═══════════════════════════════════════════════════════════════
 function showApp(user) {
   currentUser = user;
-  set("loginScreen", "display", "none");
-  set("adminApp", "display", "flex");
+  // Hide login, show app — but keep login hidden via CSS initially
+  // so there's no visible flash
+  g("loginScreen").style.display = "none";
+  g("adminApp").style.display = "flex";
 
   const init = (user.displayName || user.email || "A")[0].toUpperCase();
   setText("sbAvatar", init);
@@ -92,19 +100,17 @@ function showApp(user) {
   setVal("profilePhone", ls("adminPhone") || "");
 
   const savedAva = ls("adminAva");
-  if (savedAva) setAva(savedAva);
+  if (savedAva) setAvaImg(savedAva);
 
   loadPrefsUI();
   subscribeRealtime();
   initDash();
-
-  const lastTab = sessionStorage.getItem("adminTab") || "overview";
-  switchTab(lastTab, true);
+  switchTab(sessionStorage.getItem("adminTab") || "overview", true);
 }
 
 function showLogin(err) {
-  set("adminApp", "display", "none");
-  set("loginScreen", "display", "flex");
+  g("adminApp").style.display = "none";
+  g("loginScreen").style.display = "flex";
   if (err) {
     const el = g("loginError");
     if (el) {
@@ -121,7 +127,10 @@ async function doLogin() {
     btn = g("loginBtnText");
   if (errEl) errEl.style.display = "none";
   if (!email || !pass) {
-    showErr(errEl, "Enter your email and password.");
+    if (errEl) {
+      errEl.textContent = "Enter your email and password.";
+      errEl.style.display = "block";
+    }
     return;
   }
   if (btn) btn.innerHTML = '<span class="spinner"></span>';
@@ -130,17 +139,19 @@ async function doLogin() {
     showApp(user);
   } catch (e) {
     if (btn) btn.textContent = "Sign In";
-    showErr(
-      errEl,
+    const msg =
       e.code === "auth/wrong-password" || e.code === "auth/user-not-found"
         ? "Incorrect email or password."
-        : e.message || "Login failed.",
-    );
+        : e.message || "Login failed.";
+    if (errEl) {
+      errEl.textContent = msg;
+      errEl.style.display = "block";
+    }
   }
 }
 
 async function doLogout() {
-  if (rtChannel) sbClient.removeChannel(rtChannel);
+  if (rtChannel && sbClient) sbClient.removeChannel(rtChannel);
   await window.joyaltyAuth.firebaseSignOut().catch(() => {});
   currentUser = null;
   sessionStorage.removeItem("adminTab");
@@ -153,16 +164,21 @@ function togglePw() {
   const inp = g("loginPass"),
     ico = g("pwIcon");
   if (!inp) return;
-  const show = inp.type === "password";
-  inp.type = show ? "text" : "password";
-  if (ico) ico.className = show ? "fa-solid fa-eye-slash" : "fa-solid fa-eye";
+  inp.type = inp.type === "password" ? "text" : "password";
+  if (ico)
+    ico.className =
+      inp.type === "text" ? "fa-solid fa-eye-slash" : "fa-solid fa-eye";
 }
 
 g("loginPass")?.addEventListener("keypress", (e) => {
   if (e.key === "Enter") doLogin();
 });
 
-// Persist auth — no flash to login page on refresh
+// ── KEY FIX: checkAuthState runs immediately on page load.
+// Firebase persists the session in IndexedDB, so on refresh it calls
+// onLoggedIn immediately — the login screen never shows.
+// We hide loginScreen via CSS initially (display:none set on the element
+// itself in HTML, not via body class) to prevent any flash.
 window.joyaltyAuth.checkAuthState(
   (user) => showApp(user),
   () => showLogin(),
@@ -171,7 +187,7 @@ window.joyaltyAuth.checkAuthState(
 // ═══════════════════════════════════════════════════════════════
 // TABS
 // ═══════════════════════════════════════════════════════════════
-const TAB_TITLES = {
+const TITLES = {
   overview: "Overview",
   bookings: "Bookings",
   clients: "Clients",
@@ -186,14 +202,11 @@ function switchTab(tab, silent) {
     .querySelectorAll(".tab")
     .forEach((s) => s.classList.remove("active"));
   document
-    .querySelectorAll(".nav-item[data-tab], .bn-item[data-tab]")
-    .forEach((n) => {
-      n.classList.toggle("active", n.dataset.tab === tab);
-    });
+    .querySelectorAll(".nav-item[data-tab],.bn-item[data-tab]")
+    .forEach((n) => n.classList.toggle("active", n.dataset.tab === tab));
   g("tab-" + tab)?.classList.add("active");
-  setText("tabTitle", TAB_TITLES[tab] || tab);
+  setText("tabTitle", TITLES[tab] || tab);
   if (!silent) sessionStorage.setItem("adminTab", tab);
-
   if (tab === "bookings") loadBookings();
   if (tab === "clients") loadClients();
   if (tab === "analytics") renderAnalytics();
@@ -204,7 +217,7 @@ function switchTab(tab, silent) {
 }
 
 document
-  .querySelectorAll(".nav-item[data-tab], .bn-item[data-tab]")
+  .querySelectorAll(".nav-item[data-tab],.bn-item[data-tab]")
   .forEach((btn) => {
     btn.addEventListener("click", () => {
       const t = btn.dataset.tab;
@@ -260,17 +273,17 @@ function renderBookings(rows) {
   const tb = g("bookingsBody");
   if (!tb) return;
   if (!rows.length) {
-    tb.innerHTML = `<tr><td colspan="7"><div class="empty-state"><i class="fa-solid fa-calendar-xmark" style="font-size:2rem;opacity:.3;display:block;margin-bottom:10px"></i>No bookings yet</div></td></tr>`;
+    tb.innerHTML = `<tr><td colspan="7"><div class="empty-state">No bookings yet</div></td></tr>`;
     return;
   }
   tb.innerHTML = rows
     .map(
       (b) => `
     <tr>
-      <td style="font-family:monospace;font-size:.77rem">${esc(b.booking_ref)}</td>
-      <td><div style="font-weight:600">${esc(b.client_name || "—")}</div><div style="font-size:.73rem;color:var(--muted)">${esc(b.client_email || "")}</div></td>
+      <td style="font-family:monospace;font-size:.76rem">${esc(b.booking_ref)}</td>
+      <td><div style="font-weight:600">${esc(b.client_name || "—")}</div><div style="font-size:.72rem;color:var(--muted)">${esc(b.client_email || "")}</div></td>
       <td>${esc(b.service_name || "—")}</td>
-      <td style="font-size:.81rem">${b.event_date ? new Date(b.event_date).toLocaleDateString("en-KE") : "—"}</td>
+      <td style="font-size:.8rem">${b.event_date ? new Date(b.event_date).toLocaleDateString("en-KE") : "—"}</td>
       <td style="font-weight:600">KSh ${Number(b.total_price || 0).toLocaleString()}</td>
       <td>${badge(b.status)}</td>
       <td style="white-space:nowrap">
@@ -294,9 +307,8 @@ function badge(s) {
   return `<span class="status-badge ${cls}">${esc(lbl)}</span>`;
 }
 
-// CRUD
 function openCreateBooking() {
-  editBookingId = null;
+  editId = null;
   setText("bmTitle", "New Booking");
   [
     "bm-name",
@@ -314,7 +326,7 @@ function openCreateBooking() {
 function openEditBooking(id) {
   const b = allBookings.find((x) => x.id === id);
   if (!b) return;
-  editBookingId = id;
+  editId = id;
   setText("bmTitle", "Edit Booking");
   setVal("bm-name", b.client_name || "");
   setVal("bm-email", b.client_email || "");
@@ -354,24 +366,20 @@ async function submitBooking() {
     return;
   }
   try {
-    const ep = editBookingId
-      ? `/api/admin/bookings/${editBookingId}`
-      : "/api/bookings";
+    const ep = editId ? `/api/admin/bookings/${editId}` : "/api/bookings";
     const d = await api(ep, {
-      method: editBookingId ? "PUT" : "POST",
+      method: editId ? "PUT" : "POST",
       body: JSON.stringify(body),
     });
     if (d.success || d.bookingRef) {
       closeModal("bookingModal");
       await Promise.all([loadBookings(), loadStats()]);
       toast(
-        editBookingId ? "Booking updated." : `Booking ${d.bookingRef} created.`,
+        editId ? "Booking updated." : `Booking ${d.bookingRef} created.`,
         "success",
       );
       switchTab("bookings");
-    } else {
-      showAlert("bmAlert", d.error || "Failed.", "error");
-    }
+    } else showAlert("bmAlert", d.error || "Failed.", "error");
   } catch (e) {
     showAlert("bmAlert", e.message, "error");
   }
@@ -396,7 +404,7 @@ async function confirmDelete() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// CLIENTS
+// CLIENTS + SEARCH
 // ═══════════════════════════════════════════════════════════════
 async function loadClients() {
   try {
@@ -409,13 +417,12 @@ async function loadClients() {
       ? allClients
           .map(
             (c) =>
-              `<tr><td style="font-weight:600">${esc(c.name)}</td><td>${esc(c.email)}</td><td>${esc(c.phone || "—")}</td><td style="font-size:.79rem;color:var(--muted)">${c.created_at ? new Date(c.created_at).toLocaleDateString("en-KE") : "—"}</td></tr>`,
+              `<tr><td style="font-weight:600">${esc(c.name)}</td><td>${esc(c.email)}</td><td>${esc(c.phone || "—")}</td><td style="font-size:.78rem;color:var(--muted)">${c.created_at ? new Date(c.created_at).toLocaleDateString("en-KE") : "—"}</td></tr>`,
           )
           .join("")
       : `<tr><td colspan="4"><div class="empty-state">No clients yet</div></td></tr>`;
   } catch (_) {}
 }
-
 function onSearch(q) {
   if (!q) {
     renderBookings(allBookings);
@@ -469,17 +476,16 @@ async function sendAdminEmail() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// CHAT — Joy AI + Live (Supabase Realtime)
+// CHAT
 // ═══════════════════════════════════════════════════════════════
 function initChat() {
-  g("modeBtnBot")?.classList.toggle("active", adminChatMode === "bot");
-  g("modeBtnLive")?.classList.toggle("active", adminChatMode === "live");
-  if (adminChatMode === "bot") renderBotContact();
+  g("modeBtnBot")?.classList.toggle("active", chatMode === "bot");
+  g("modeBtnLive")?.classList.toggle("active", chatMode === "live");
+  if (chatMode === "bot") renderBotContact();
   else loadSessions();
 }
-
 function setChatMode(mode) {
-  adminChatMode = mode;
+  chatMode = mode;
   g("modeBtnBot")?.classList.toggle("active", mode === "bot");
   g("modeBtnLive")?.classList.toggle("active", mode === "live");
   g("adminMsgs").innerHTML = "";
@@ -493,16 +499,11 @@ function setChatMode(mode) {
   }
 }
 
-/* ── Bot ────────────────────────────────────────────────────── */
 function renderBotContact() {
-  g("contactList").innerHTML = `
-    <div class="contact-item active" id="botItem" onclick="selectBot(this)">
-      <div class="c-ava bot"><i class="fa-solid fa-robot"></i></div>
-      <div><div class="c-name">Joy — AI Assistant</div><div class="c-prev">Ask about bookings, revenue, clients…</div></div>
-    </div>`;
+  g("contactList").innerHTML =
+    `<div class="contact-item active" id="botItem" onclick="selectBot(this)"><div class="c-ava bot"><i class="fa-solid fa-robot"></i></div><div><div class="c-name">Joy — AI Assistant</div><div class="c-prev">Live data: bookings, revenue, clients</div></div></div>`;
   selectBot(g("botItem"));
 }
-
 function selectBot(el) {
   document
     .querySelectorAll(".contact-item")
@@ -516,14 +517,13 @@ function selectBot(el) {
   g("adminMsgs").innerHTML = "";
   aiConvo = [];
   appendMsg(
-    "Hi Admin 👋 I have access to your live bookings, clients and revenue data. Ask me anything.",
+    "Hi Admin 👋 I have your live bookings, clients and revenue data. Ask me anything.",
     "in",
     "🤖",
   );
   showChat();
 }
 
-/* ── Live sessions ──────────────────────────────────────────── */
 async function loadSessions() {
   try {
     const d = await api("/api/live-chat/sessions");
@@ -532,28 +532,19 @@ async function loadSessions() {
     renderContacts([]);
   }
 }
-
 function renderContacts(sessions) {
   const list = g("contactList");
   if (!sessions.length) {
-    list.innerHTML = `<div class="empty-state" style="padding:20px 14px;font-size:.82rem">No live sessions yet.</div>`;
+    list.innerHTML = `<div class="empty-state" style="padding:20px 14px;font-size:.81rem">No live sessions yet.</div>`;
     return;
   }
   list.innerHTML = sessions
     .map((s) => {
       const name = s.name || s.session_id.split("-")[0];
-      return `<div class="contact-item${s.session_id === activeSession ? " active" : ""}" onclick="selectSession('${esc(s.session_id)}','${esc(name)}')">
-      <div class="c-ava">${name[0].toUpperCase()}</div>
-      <div style="min-width:0;flex:1">
-        <div class="c-name">${esc(name)}</div>
-        <div class="c-prev">${esc((s.last_text || "").substring(0, 36))}</div>
-      </div>
-      ${s.unread > 0 ? `<span class="c-unread">${s.unread}</span>` : ""}
-    </div>`;
+      return `<div class="contact-item${s.session_id === activeSession ? " active" : ""}" onclick="selectSession('${esc(s.session_id)}','${esc(name)}')"><div class="c-ava">${name[0].toUpperCase()}</div><div style="min-width:0;flex:1"><div class="c-name">${esc(name)}</div><div class="c-prev">${esc((s.last_text || "").substring(0, 34))}</div></div>${s.unread > 0 ? `<span class="c-unread">${s.unread}</span>` : ""}</div>`;
     })
     .join("");
 }
-
 async function selectSession(sid, name) {
   document
     .querySelectorAll(".contact-item")
@@ -567,7 +558,6 @@ async function selectSession(sid, name) {
   g("chatHdAva").className = "chat-ava";
   g("chatHdAva").textContent = (name || "?")[0].toUpperCase();
   g("adminMsgs").innerHTML = "";
-
   try {
     const d = await api(`/api/live-chat?sessionId=${encodeURIComponent(sid)}`);
     (d.messages || []).forEach(renderBubble);
@@ -575,12 +565,9 @@ async function selectSession(sid, name) {
   showChat();
 }
 
-/* ── Render a bubble (dedup by data-msg-id) ────────────────── */
 function renderBubble(msg) {
   const msgs = g("adminMsgs");
-  // ── DOUBLE-BUBBLE FIX: skip if already in DOM ────────────
-  if (msgs.querySelector(`[data-msg-id="${msg.id}"]`)) return;
-
+  if (msgs.querySelector(`[data-msg-id="${msg.id}"]`)) return; // ← dedup
   const isOut = msg.sender === "admin";
   const time = new Date(msg.timestamp || Date.now()).toLocaleTimeString(
     "en-KE",
@@ -589,34 +576,24 @@ function renderBubble(msg) {
   const div = document.createElement("div");
   div.className = `msg ${isOut ? "out" : "in"}`;
   div.dataset.msgId = msg.id;
-  div.innerHTML = `
-    <div class="msg-ava">${isOut ? "A" : (msg.name || "?")[0].toUpperCase()}</div>
-    <div class="msg-col">
-      <div class="msg-bubble">${esc(msg.text)}</div>
-      <div class="msg-time">${isOut ? "You" : "Client"} · ${time}</div>
-    </div>`;
+  div.innerHTML = `<div class="msg-ava">${isOut ? "A" : (msg.name || "?")[0].toUpperCase()}</div><div class="msg-col"><div class="msg-bubble">${esc(msg.text)}</div><div class="msg-time">${isOut ? "You" : "Client"} · ${time}</div></div>`;
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 }
 
-/* ── Send ──────────────────────────────────────────────────── */
 async function sendAdminMsg() {
   const input = g("adminInput");
   const text = input.value.trim();
   if (!text) return;
   input.value = "";
 
-  /* ── Joy AI mode ──────────────────────────────────────── */
-  if (activeSession === "joy" || adminChatMode === "bot") {
+  // ── Joy AI ──────────────────────────────────────────────────
+  if (activeSession === "joy" || chatMode === "bot") {
     aiConvo.push({ type: "user", text });
     appendMsg(text, "out", "A");
-
-    // Build context from live data
-    const ctx = `You are Joy, the AI assistant for Joyalty Photography admin dashboard.
-LIVE DATA: Bookings: ${allBookings.length}, Confirmed: ${allBookings.filter((b) => b.status === "confirmed").length}, Pending payment: ${allBookings.filter((b) => b.status === "pending_payment").length}, Revenue collected: KSh ${allBookings.reduce((a, b) => a + Number(b.deposit_paid || 0), 0).toLocaleString()}, Clients: ${allClients.length}.
-Today: ${new Date().toLocaleDateString("en-KE", { dateStyle: "full" })}.
-Be concise, professional and helpful. Use the live data above when answering questions about the business.`;
-
+    const ctx = `You are Joy, AI assistant for Joyalty Photography admin dashboard.
+LIVE DATA: Total bookings: ${allBookings.length}, Confirmed: ${allBookings.filter((b) => b.status === "confirmed").length}, Pending: ${allBookings.filter((b) => b.status === "pending_payment").length}, Revenue: KSh ${allBookings.reduce((a, b) => a + Number(b.deposit_paid || 0), 0).toLocaleString()}, Clients: ${allClients.length}. Today: ${new Date().toLocaleDateString("en-KE", { dateStyle: "full" })}.
+Be concise and helpful.`;
     const formatted = [
       { role: "user", parts: [{ text: ctx }] },
       ...aiConvo
@@ -627,46 +604,39 @@ Be concise, professional and helpful. Use the live data above when answering que
         })),
       { role: "user", parts: [{ text }] },
     ];
-
-    const typing = Object.assign(document.createElement("div"), {
-      className: "typing",
-      id: "adminTyping",
-    });
-    typing.innerHTML = "<span></span><span></span><span></span>";
-    g("adminMsgs").appendChild(typing);
+    const tp = document.createElement("div");
+    tp.className = "typing";
+    tp.id = "adminTyping";
+    tp.innerHTML = "<span></span><span></span><span></span>";
+    g("adminMsgs").appendChild(tp);
     g("adminMsgs").scrollTop = 99999;
-
     try {
       const res = await api("/api/gemini-chat", {
         method: "POST",
         body: JSON.stringify({ messages: formatted }),
       });
-      typing.remove();
-      const reply = res.reply || "I couldn't respond right now.";
+      tp.remove();
+      const reply = res.reply || "I couldn't respond.";
       aiConvo.push({ type: "bot", text: reply });
       appendMsg(reply, "in", "🤖");
     } catch (_) {
-      typing.remove();
+      tp.remove();
       appendMsg("Connection error.", "in", "⚠");
     }
     return;
   }
 
-  /* ── Live chat reply ───────────────────────────────────── */
+  // ── Live reply ──────────────────────────────────────────────
   if (!activeSession) return;
-
-  // Render optimistically with a temp ID — will be replaced with real DB id
   const tempId = "tmp-" + Date.now();
-  const tempMsg = {
+  renderBubble({
     id: tempId,
     sender: "admin",
     name: "Admin",
     text,
     timestamp: new Date().toISOString(),
-  };
-  renderBubble(tempMsg);
+  });
   sentIds.add(tempId);
-
   try {
     const res = await api("/api/live-chat", {
       method: "POST",
@@ -675,10 +645,9 @@ Be concise, professional and helpful. Use the live data above when answering que
         sender: "admin",
         name: "Admin",
         text,
-        timestamp: tempMsg.timestamp,
+        timestamp: new Date().toISOString(),
       }),
     });
-    // When DB returns the real ID, update data-msg-id to prevent Realtime re-rendering
     if (res.id) {
       sentIds.add(String(res.id));
       const el = g("adminMsgs").querySelector(`[data-msg-id="${tempId}"]`);
@@ -689,7 +658,6 @@ Be concise, professional and helpful. Use the live data above when answering que
   }
 }
 
-/* Generic append (AI mode, no ID needed) */
 function appendMsg(text, dir, ava) {
   const msgs = g("adminMsgs");
   const time = new Date().toLocaleTimeString("en-KE", {
@@ -702,15 +670,13 @@ function appendMsg(text, dir, ava) {
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 }
-
 function clearChat() {
   aiConvo = [];
   g("adminMsgs").innerHTML = "";
-  if (adminChatMode === "bot")
+  if (chatMode === "bot")
     appendMsg("Chat cleared. Ask me anything.", "in", "🤖");
 }
 
-/* Mobile chat panel navigation */
 function showChat() {
   if (window.innerWidth <= 768) {
     g("chatContacts")?.classList.add("hidden");
@@ -742,7 +708,7 @@ function resetUnread() {
 // ═══════════════════════════════════════════════════════════════
 async function requestNotifPerm() {
   if (!("Notification" in window)) {
-    toast("Not supported in this browser.", "error");
+    toast("Not supported.", "error");
     return;
   }
   const p = await Notification.requestPermission();
@@ -752,10 +718,10 @@ async function requestNotifPerm() {
     g("pushToggle").checked = true;
     savePref("pushEnabled", true);
     prefs.pushEnabled = true;
-    setText("notifStatus", "Push notifications are enabled.");
+    setText("notifStatus", "Notifications are enabled.");
   } else {
     toast("Permission denied.", "error");
-    setText("notifStatus", "Please enable in browser settings.");
+    setText("notifStatus", "Enable in browser settings.");
   }
 }
 function togglePush(on) {
@@ -776,13 +742,13 @@ function beep() {
   try {
     const c = new (window.AudioContext || window.webkitAudioContext)(),
       o = c.createOscillator(),
-      g2 = c.createGain();
-    o.connect(g2);
-    g2.connect(c.destination);
+      gn = c.createGain();
+    o.connect(gn);
+    gn.connect(c.destination);
     o.frequency.setValueAtTime(880, c.currentTime);
     o.frequency.exponentialRampToValueAtTime(440, c.currentTime + 0.15);
-    g2.gain.setValueAtTime(0.28, c.currentTime);
-    g2.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.3);
+    gn.gain.setValueAtTime(0.28, c.currentTime);
+    gn.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.3);
     o.start();
     o.stop(c.currentTime + 0.3);
   } catch (_) {}
@@ -800,16 +766,16 @@ function previewAva(input) {
   }
   const r = new FileReader();
   r.onload = (e) => {
-    setAva(e.target.result);
+    setAvaImg(e.target.result);
     localStorage.setItem("adminAva", e.target.result);
   };
   r.readAsDataURL(file);
 }
-function setAva(src) {
+function setAvaImg(src) {
   ["avaPreview", "sbAvatar"].forEach((id) => {
     const el = g(id);
     if (el)
-      el.innerHTML = `<img src="${src}" alt="Avatar" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;
+      el.innerHTML = `<img src="${src}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;
   });
 }
 function saveProfile() {
@@ -828,7 +794,7 @@ async function changePassword() {
   const np = getVal("newPw"),
     cp = getVal("confirmPw");
   if (!np || np.length < 8) {
-    showAlert("pwAlert", "Minimum 8 characters.", "error");
+    showAlert("pwAlert", "Min 8 characters.", "error");
     return;
   }
   if (np !== cp) {
@@ -862,14 +828,14 @@ function loadPrefsUI() {
   if (pt) pt.checked = !!prefs.pushEnabled;
   if (cn) cn.checked = prefs.chatNotif !== false;
   if (sn) sn.checked = !!prefs.soundNotif;
-  const granted = Notification.permission === "granted";
+  const ok = Notification.permission === "granted";
   setText(
     "notifStatus",
-    granted && prefs.pushEnabled
+    ok && prefs.pushEnabled
       ? "Notifications are enabled."
-      : "Click 🔔 in the topbar to enable.",
+      : "Click 🔔 to enable.",
   );
-  if (granted && prefs.pushEnabled) {
+  if (ok && prefs.pushEnabled) {
     const d = g("notifDot");
     if (d) d.style.display = "";
   }
@@ -894,9 +860,8 @@ function renderOverviewCharts() {
     "Nov",
     "Dec",
   ];
-  const now = new Date().getMonth();
-  const labels = mo.slice(Math.max(0, now - 5), now + 1);
-
+  const now = new Date().getMonth(),
+    labels = mo.slice(Math.max(0, now - 5), now + 1);
   dc("bookingsChart");
   charts.bk = new Chart(g("bookingsChart"), {
     type: "bar",
@@ -906,7 +871,7 @@ function renderOverviewCharts() {
         {
           label: "Bookings",
           data: [2, 5, 3, 8, 6, allBookings.length || 1],
-          backgroundColor: "rgba(212,168,75,.32)",
+          backgroundColor: "rgba(212,168,75,.3)",
           borderColor: "#d4a84b",
           borderWidth: 1.5,
           borderRadius: 5,
@@ -915,7 +880,6 @@ function renderOverviewCharts() {
     },
     options: cOpts(),
   });
-
   const sc = {};
   allBookings.forEach((b) => {
     const s = b.service_name || "Other";
@@ -954,15 +918,6 @@ function renderOverviewCharts() {
       },
     },
   });
-
-  const rv = [
-    45e3,
-    90e3,
-    60e3,
-    160e3,
-    120e3,
-    allBookings.reduce((a, b) => a + Number(b.deposit_paid || 0), 0) || 45e3,
-  ];
   dc("revenueChart");
   charts.rv = new Chart(g("revenueChart"), {
     type: "line",
@@ -971,7 +926,15 @@ function renderOverviewCharts() {
       datasets: [
         {
           label: "Revenue",
-          data: rv,
+          data: [
+            45e3,
+            90e3,
+            60e3,
+            160e3,
+            120e3,
+            allBookings.reduce((a, b) => a + Number(b.deposit_paid || 0), 0) ||
+              45e3,
+          ],
           borderColor: "#22c55e",
           backgroundColor: "rgba(34,197,94,.08)",
           fill: true,
@@ -984,7 +947,6 @@ function renderOverviewCharts() {
     options: cOpts({ yTick: (v) => `${(v / 1000).toFixed(0)}K` }),
   });
 }
-
 function renderAnalytics() {
   const sc = { pending: 0, confirmed: 0, cancelled: 0, completed: 0 };
   allBookings.forEach((b) => {
@@ -1054,7 +1016,7 @@ function renderAnalytics() {
           data: days.map((_, i) =>
             i === 29 ? 45e3 : i === 28 ? 30e3 : i === 25 ? 18e3 : 0,
           ),
-          backgroundColor: "rgba(212,168,75,.32)",
+          backgroundColor: "rgba(212,168,75,.3)",
           borderColor: "#d4a84b",
           borderWidth: 1.5,
           borderRadius: 2,
@@ -1064,7 +1026,6 @@ function renderAnalytics() {
     options: cOpts({ xLimit: 8, yTick: (v) => `${(v / 1000).toFixed(0)}K` }),
   });
 }
-
 function cOpts(o = {}) {
   return {
     plugins: { legend: { display: false } },
@@ -1139,7 +1100,6 @@ function toast(msg, type = "info") {
     setTimeout(() => t.remove(), 260);
   }, 3400);
 }
-
 function showAlert(id, msg, type) {
   const el = g(id);
   if (!el) return;
@@ -1147,7 +1107,6 @@ function showAlert(id, msg, type) {
   el.className = `alert ${type}`;
   setTimeout(() => {
     el.className = "alert";
-    el.style.display = "none";
   }, 5000);
 }
 
@@ -1191,16 +1150,6 @@ function setIdx(id, i) {
   const el = g(id);
   if (el) el.selectedIndex = i;
 }
-function set(id, prop, v) {
-  const el = g(id);
-  if (el) el.style[prop] = v;
-}
 function ls(k) {
   return localStorage.getItem(k) || "";
-}
-function showErr(el, msg) {
-  if (el) {
-    el.textContent = msg;
-    el.style.display = "block";
-  }
 }
