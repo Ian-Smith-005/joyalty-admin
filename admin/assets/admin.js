@@ -198,23 +198,25 @@ const TITLES = {
 };
 
 function switchTab(tab, silent) {
-  document
-    .querySelectorAll(".tab")
-    .forEach((s) => s.classList.remove("active"));
-  document
-    .querySelectorAll(".nav-item[data-tab],.bn-item[data-tab]")
-    .forEach((n) => n.classList.toggle("active", n.dataset.tab === tab));
-  g("tab-" + tab)?.classList.add("active");
+  document.querySelectorAll(".tab").forEach(s => s.classList.remove("active"));
+  document.querySelectorAll(".nav-item[data-tab],.bn-item[data-tab]").forEach(n => {
+    n.classList.toggle("active", n.dataset.tab === tab);
+  });
+  g("tab-"+tab)?.classList.add("active");
   setText("tabTitle", TITLES[tab] || tab);
   if (!silent) sessionStorage.setItem("adminTab", tab);
-  if (tab === "bookings") loadBookings();
-  if (tab === "clients") loadClients();
+ 
+  // ── Chat mode class — lets CSS give the chat panel full height
+  //    without bleeding into other tabs (fallback for no :has())
+  const pc = document.querySelector(".page-content");
+  if (pc) pc.classList.toggle("chat-mode", tab === "chat");
+ 
+  if (tab === "bookings")  loadBookings();
+  if (tab === "clients")   loadClients();
   if (tab === "analytics") renderAnalytics();
-  if (tab === "chat") {
-    initChat();
-    resetUnread();
-  }
+  if (tab === "chat")      { initChat(); resetUnread(); }
 }
+ 1
 
 document
   .querySelectorAll(".nav-item[data-tab],.bn-item[data-tab]")

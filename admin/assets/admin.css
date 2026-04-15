@@ -1,10 +1,11 @@
 /* ============================================================
-   JOYALTY ADMIN — admin.css
-   ✓ Full viewport coverage (no overflow, no scroll on body)
-   ✓ Glassmorphism cards
-   ✓ Chat panel fills available height with scrollable messages
-   ✓ Fixed layout — nothing moves unexpectedly
-   ✓ Responsive: sidebar desktop / bottom nav mobile
+   JOYALTY ADMIN — admin.css  (bug-fixed)
+   KEY FIX: #tab-chat never overrides display:none with display:flex.
+   All tab layout uses .tab.active as the hook, not the ID directly.
+   ✓ Glassmorphism
+   ✓ Full viewport, fixed layout
+   ✓ Chat fills height with scrollable messages
+   ✓ Sidebar desktop / bottom nav mobile
 ============================================================ */
 
 /* ── Reset & Variables ─────────────────────────────────────── */
@@ -42,7 +43,7 @@
   --r-lg: 16px;
 }
 
-/* ── Base: full screen, fixed, no scroll on root ──────────── */
+/* ── Base ──────────────────────────────────────────────────── */
 html,
 body {
   width: 100%;
@@ -52,8 +53,6 @@ body {
   font-size: 15px;
   color: var(--text);
 }
-
-/* Dark textured background fixed to viewport */
 body {
   background:
     radial-gradient(
@@ -70,7 +69,7 @@ body {
   background-attachment: fixed;
 }
 
-/* ── Glassmorphism base ────────────────────────────────────── */
+/* ── Glassmorphism ─────────────────────────────────────────── */
 .glass-card {
   background: var(--surface);
   backdrop-filter: blur(20px) saturate(1.4);
@@ -135,7 +134,7 @@ body {
   }
 }
 
-/* ── LOGIN — full screen centered ─────────────────────────── */
+/* ── LOGIN ─────────────────────────────────────────────────── */
 #loginScreen {
   position: fixed;
   inset: 0;
@@ -232,7 +231,7 @@ body {
   transform: translateY(-1px);
 }
 
-/* ── APP SHELL — fixed, full viewport, no scroll ──────────── */
+/* ── APP SHELL ─────────────────────────────────────────────── */
 #adminApp {
   display: none;
   position: fixed;
@@ -411,7 +410,7 @@ body {
   display: block;
 }
 
-/* ── MAIN WRAP — fills remaining space, contains topbar + scrollable content ── */
+/* ── MAIN WRAP ─────────────────────────────────────────────── */
 .main-wrap {
   position: absolute;
   top: 0;
@@ -546,13 +545,18 @@ body {
   background: var(--surface3);
 }
 
-/* ── PAGE CONTENT — scrollable, fills all remaining height ─── */
+/* ═══════════════════════════════════════════════════════════════
+   PAGE CONTENT + TABS
+   The page-content scrolls. Each .tab is hidden by default.
+   Only .tab.active is shown. The chat tab is handled specially
+   below ONLY when it has .active — never otherwise.
+═══════════════════════════════════════════════════════════════ */
 .page-content {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 20px;
-  /* Custom scrollbar */
+  /* This must remain a normal block scroll context */
 }
 .page-content::-webkit-scrollbar {
   width: 5px;
@@ -565,14 +569,56 @@ body {
   border-radius: 5px;
 }
 
+/* ALL tabs hidden by default */
 .tab {
   display: none;
 }
+
+/* All non-chat active tabs show as normal block */
 .tab.active {
   display: block;
 }
 
-/* ── STAT CARDS ────────────────────────────────────────────── */
+/* ── CHAT TAB SPECIAL CASE ─────────────────────────────────────
+   We only change the chat tab's display when it is ACTIVE.
+   The selector is .tab.active#tab-chat — this ensures:
+   - When hidden: display:none (from .tab rule above) wins
+   - When active: display:flex overrides .tab.active { display:block }
+   This fixes the bleed-through bug entirely.
+─────────────────────────────────────────────────────────────── */
+.tab.active#tab-chat {
+  display: flex;
+  flex-direction: column;
+  /* Fill the page-content height.
+     page-content has overflow-y:auto, so we switch it to flex
+     only when chat is visible so the panel can fill properly. */
+  height: 100%;
+}
+
+/* When chat is active, page-content becomes a flex container
+   so the chat tab can fill available height */
+.page-content:has(#tab-chat.active) {
+  display: flex;
+  flex-direction: column;
+  padding: 0; /* chat panel handles its own padding */
+  overflow: hidden; /* chat panel scrolls internally */
+}
+
+/* Fallback for browsers without :has() support —
+   JS adds .chat-mode class to page-content */
+.page-content.chat-mode {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.page-content.chat-mode .tab.active {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ── STATS ─────────────────────────────────────────────────── */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -956,21 +1002,16 @@ body {
   margin: 6px 0;
 }
 
-/* ═══════════════════════════════════════════════════════════
-   CHAT PANEL — fills available height, messages scroll
-═══════════════════════════════════════════════════════════ */
-#tab-chat {
-  /* Fill the entire page-content area */
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
+/* ═══════════════════════════════════════════════════════════════
+   CHAT PANEL
+   Only styled when inside .tab.active#tab-chat.
+   No styles leak to other tabs.
+═══════════════════════════════════════════════════════════════ */
 .chat-panel {
   flex: 1;
   display: grid;
   grid-template-columns: 268px 1fr;
-  min-height: 0; /* critical — allows flex children to shrink */
+  min-height: 0;
   border-radius: var(--r);
   overflow: hidden;
 }
@@ -1101,7 +1142,7 @@ body {
 .chat-main {
   display: flex;
   flex-direction: column;
-  min-height: 0; /* critical — allows shrink */
+  min-height: 0;
   overflow: hidden;
 }
 .chat-main-hd {
@@ -1151,16 +1192,16 @@ body {
   margin-top: 1px;
 }
 
-/* MESSAGES — this is the scrollable area */
+/* Messages — this scrolls */
 .chat-msgs {
   flex: 1;
-  overflow-y: auto; /* ← THE KEY FIX */
+  overflow-y: auto; /* scrollable */
   overflow-x: hidden;
+  min-height: 0; /* critical in flex context */
   padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-height: 0; /* ← also critical in flex context */
 }
 .chat-msgs::-webkit-scrollbar {
   width: 4px;
@@ -1491,7 +1532,7 @@ body {
   gap: 8px;
 }
 
-/* ── BOTTOM NAV (mobile only) ──────────────────────────────── */
+/* ── BOTTOM NAV ────────────────────────────────────────────── */
 .bottom-nav {
   display: none;
   position: fixed;
@@ -1651,7 +1692,7 @@ body {
 }
 
 @media (max-width: 768px) {
-  /* Sidebar hides off-screen */
+  /* Sidebar off-screen */
   .sidebar {
     transform: translateX(-100%);
     z-index: 210;
@@ -1661,13 +1702,12 @@ body {
     box-shadow: 4px 0 32px rgba(0, 0, 0, 0.4);
   }
 
-  /* Main wrap fills full screen */
+  /* Main fills full width, leaves room for bottom nav */
   .main-wrap {
     left: 0;
     bottom: var(--bn-h);
   }
 
-  /* Show hamburger, show bottom nav */
   .hamburger {
     display: flex;
   }
@@ -1675,7 +1715,6 @@ body {
     display: flex;
   }
 
-  /* Topbar */
   .topbar {
     padding: 0 12px;
     gap: 8px;
@@ -1693,7 +1732,7 @@ body {
     padding: 12px;
   }
 
-  /* Stats 2 col */
+  /* Stats 2-col on tablet */
   .stats-grid {
     grid-template-columns: 1fr 1fr;
     gap: 9px;
@@ -1706,7 +1745,7 @@ body {
     font-size: 1.22rem;
   }
 
-  /* Chat panel — full screen two-pane */
+  /* Chat: two-pane full screen */
   .chat-panel {
     display: block;
     position: relative;
@@ -1737,16 +1776,11 @@ body {
   .back-btn {
     display: flex;
   }
-
-  /* Chat tab fills available area exactly */
-  #tab-chat {
-    height: 100%;
-  }
   .chat-msgs {
     padding: 10px;
   }
 
-  /* Table — hide less critical columns */
+  /* Tables: hide less-critical columns */
   .admin-table th:nth-child(3),
   .admin-table td:nth-child(3),
   .admin-table th:nth-child(4),
