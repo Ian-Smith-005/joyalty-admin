@@ -1,7 +1,4 @@
 name = "joyalty-admin"
 pages_build_output_dir = "admin"
 
-[vars]
-SUPABASE_URL = "https://sabqbqbpdgyallogkfmw.supabase.co"
-SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNhYnFicWJwZGd5YWxsb2drZm13Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTg3NjE0OSwiZXhwIjoyMDkxNDUyMTQ5fQ._dImTdge9-paE9uHi4Xb7hvNOgyEZR789UzBu-msP7E
-"
+
