@@ -1,9 +1,8 @@
 /* ============================================================
-  Real time Firebase login 
-  
+   Firebase Admin Auth (Full)
 ============================================================ */
 
-// ── Firebase config — replace with your real values ──────────
+// ── Firebase config ──────────────────────────────────────────
 const firebaseConfig = {
   apiKey: "AIzaSyA23Ne4ZmJGpGkeEOu3r6ePPx2vLwXKLl0",
   authDomain: "joyalty-admin.firebaseapp.com",
@@ -13,36 +12,34 @@ const firebaseConfig = {
   appId: "1:839017798819:web:66cdb6298ee614a20f3316",
 };
 
-// ── Allowed admin emails — only these can access the dashboard
-// Add/remove emails here to control access
-const ALLOWED_ADMINS = [
-  "smithiian34@gmail.com", //test email
-  // "secondadmin@example.com",
-];
+// ── Allowed admins ───────────────────────────────────────────
+const ALLOWED_ADMINS = ["smithiian34@gmail.com"];
 
-// ── Firebase SDK (loaded via CDN in admin/index.html) ─────────
-// Make sure these script tags are in admin/index.html <head>:
-//   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-//   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-//   <script src="auth.js"></script>
-
+// ── Firebase init ────────────────────────────────────────────
 let firebaseApp = null;
 let firebaseAuth = null;
 
 function initFirebase() {
   if (firebaseApp) return;
+
   try {
     firebaseApp = firebase.initializeApp(firebaseConfig);
     firebaseAuth = firebase.auth();
     console.log("[auth] Firebase initialised");
   } catch (err) {
-    console.error("[auth] Firebase init failed:", err.message);
+    console.error("[auth] Init failed:", err.message);
   }
 }
 
-// ── Sign in ───────────────────────────────────────────────────
+// ── Redirect ─────────────────────────────────────────────────
+function redirectToLogin() {
+  window.location.href = "/admin/login/index.html";
+}
+
+// ── Sign in ──────────────────────────────────────────────────
 async function firebaseSignIn(email, password) {
   initFirebase();
+
   if (!firebaseAuth) throw new Error("Firebase not initialised");
 
   const credential = await firebaseAuth.signInWithEmailAndPassword(
@@ -53,22 +50,29 @@ async function firebaseSignIn(email, password) {
 
   if (!ALLOWED_ADMINS.includes(user.email)) {
     await firebaseAuth.signOut();
-    throw new Error("Access denied — this email is not an admin.");
+    throw new Error("Access denied — not an admin");
   }
 
   return user;
 }
 
-// ── Sign out ──────────────────────────────────────────────────
+// ── Sign out ─────────────────────────────────────────────────
 async function firebaseSignOut() {
-  if (firebaseAuth) await firebaseAuth.signOut();
+  initFirebase();
+
+  if (firebaseAuth) {
+    await firebaseAuth.signOut();
+  }
+
+  redirectToLogin();
 }
 
-// ── Check existing session on page load ──────────────────────
-function checkAuthState(onLoggedIn, onLoggedOut) {
+// ── Auth state guard ─────────────────────────────────────────
+function checkAuthState(onLoggedIn) {
   initFirebase();
+
   if (!firebaseAuth) {
-    onLoggedOut();
+    redirectToLogin();
     return;
   }
 
@@ -76,10 +80,14 @@ function checkAuthState(onLoggedIn, onLoggedOut) {
     if (user && ALLOWED_ADMINS.includes(user.email)) {
       onLoggedIn(user);
     } else {
-      onLoggedOut();
+      redirectToLogin();
     }
   });
 }
 
-// ── Export for use in admin/index.html ────────────────────────
-window.joyaltyAuth = { firebaseSignIn, firebaseSignOut, checkAuthState };
+// ── Export ───────────────────────────────────────────────────
+window.joyaltyAuth = {
+  firebaseSignIn,
+  firebaseSignOut,
+  checkAuthState,
+};
