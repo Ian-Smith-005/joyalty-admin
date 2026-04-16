@@ -329,7 +329,7 @@
     <script>
         // If already logged in, go straight to dashboard
         window.joyaltyAuth.checkAuthState(
-            () => { window.location.replace("/admin/"); },
+            () => { window.location.replace("/"); },
             () => { /* not logged in — show form */ }
         );
 
@@ -348,7 +348,7 @@
 
             try {
                 await window.joyaltyAuth.firebaseSignIn(email, pass);
-                window.location.replace("/admin/");
+                window.location.replace("/");
             } catch (e) {
                 btn.textContent = "Sign In";
                 errBox.textContent = (e.code === "auth/wrong-password" || e.code === "auth/user-not-found")
