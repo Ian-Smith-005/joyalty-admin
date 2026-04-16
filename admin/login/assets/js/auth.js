@@ -1,7 +1,7 @@
 // If already logged in, go straight to dashboard
 window.joyaltyAuth.checkAuthState(
   () => {
-    window.location.replace("../"); // → admin/index
+    window.location.replace("../admin/"); // → admin/index
   },
   () => {
     /* not logged in — stay on login */
@@ -26,7 +26,7 @@ async function doLogin() {
 
   try {
     await window.joyaltyAuth.firebaseSignIn(email, pass);
-    window.location.replace("../"); // → admin/index
+    window.location.replace("../admin/"); // → admin/index
   } catch (e) {
     btn.textContent = "Sign In";
 
