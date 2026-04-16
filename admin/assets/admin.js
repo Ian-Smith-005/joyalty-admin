@@ -103,7 +103,7 @@ async function doLogout() {
   if (rtChannel && sbClient) sbClient.removeChannel(rtChannel);
   if (presenceChannel && sbClient) sbClient.removeChannel(presenceChannel);
   await window.joyaltyAuth.firebaseSignOut().catch(() => {});
-  window.location.replace("/admin/login/");
+  window.location.replace("/login/");
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -816,12 +816,10 @@ async function sendAdminMsg() {
 LIVE DATA: Bookings: ${allBookings.length}, Confirmed: ${allBookings.filter((b) => b.status === "confirmed").length}, Pending: ${allBookings.filter((b) => b.status === "pending_payment").length}, Revenue: KSh ${allBookings.reduce((a, b) => a + Number(b.deposit_paid || 0), 0).toLocaleString()}, Clients: ${allClients.length}. Today: ${new Date().toLocaleDateString("en-KE", { dateStyle: "full" })}.`;
     const formatted = [
       { role: "user", parts: [{ text: ctx }] },
-      ...aiConvo
-        .slice(0, -1)
-        .map((m) => ({
-          role: m.type === "user" ? "user" : "model",
-          parts: [{ text: m.text }],
-        })),
+      ...aiConvo.slice(0, -1).map((m) => ({
+        role: m.type === "user" ? "user" : "model",
+        parts: [{ text: m.text }],
+      })),
       { role: "user", parts: [{ text }] },
     ];
     showTyping("Joy is typing");
