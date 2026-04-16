@@ -1,40 +1,34 @@
 /* ============================================================
    JOYALTY ADMIN — admin.js
-   ✓ Supabase URL loaded from /api/config (awaits __configReady)
-   ✓ Firebase auth persists — no login flash on refresh
-   ✓ Tab memory (sessionStorage)
-   ✓ Supabase Realtime live chat
-   ✓ Joy AI with live data context
-   ✓ Double-bubble fix (data-msg-id dedup + sentIds)
-   ✓ Push notifications + sound
-   ✓ Profile editor + avatar
-   ✓ Full CRUD bookings
+   ✓ Auth on separate /admin/login/ page — dashboard guard only
+   ✓ Typing animation (admin + user)
+   ✓ Online presence indicator (Supabase presence channel)
+   ✓ Push notifications on new message (fixed — uses SW if available)
+   ✓ Bubble send sound (Web Audio)
+   ✓ Smooth tab transitions
+   ✓ DELETE booking fix (uses correct endpoint + CORS method)
+   ✓ Charts load real data from DB
+   ✓ PWA install prompt
 ============================================================ */
 
-// ── Wait for Supabase config to be ready (set by index.html) ─
-// admin.js is loaded dynamically only AFTER window.__configReady resolves,
-// so SUPABASE_URL and SUPABASE_ANON are guaranteed to be set here.
-
+// ── Supabase ──────────────────────────────────────────────────
 const SB_URL = window.SUPABASE_URL || "";
 const SB_ANON = window.SUPABASE_ANON || "";
-
-// Only create Supabase client if we have valid config
 let sbClient = null;
-if (SB_URL && SB_ANON && SB_URL !== "https://YOUR_PROJECT.supabase.co") {
+if (SB_URL && SB_ANON && !SB_URL.includes("YOUR_PROJECT")) {
   try {
     sbClient = supabase.createClient(SB_URL, SB_ANON);
-    console.log("[admin] Supabase client ready:", SB_URL);
   } catch (e) {
-    console.error("[admin] Supabase init failed:", e.message);
+    console.error("[supabase]", e.message);
   }
 } else {
   console.warn(
-    "[admin] Supabase URL not configured — realtime disabled. Set SUPABASE_URL and SUPABASE_ANON_KEY in Cloudflare env vars.",
+    "[admin] Supabase not configured. Set SUPABASE_URL + SUPABASE_ANON_KEY in Cloudflare env vars.",
   );
 }
 
 // ── State ──────────────────────────────────────────────────────
-let currentUser = null;
+const currentUser = window.__currentUser;
 let allBookings = [];
 let allClients = [];
 let chatMode = "bot";
@@ -42,12 +36,78 @@ let aiConvo = [];
 let activeSession = null;
 let sentIds = new Set();
 let rtChannel = null;
+let presenceChannel = null;
 let unread = 0;
 let prefs = loadPrefs();
 let editId = null;
+let onlineUsers = {}; // { sessionId: true/false }
+let deferredPrompt = null; // PWA install prompt
+
+// ── PWA install prompt ────────────────────────────────────────
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  showInstallBanner();
+});
+
+function showInstallBanner() {
+  if (document.getElementById("pwaInstallBanner")) return;
+  const banner = document.createElement("div");
+  banner.id = "pwaInstallBanner";
+  banner.style.cssText = `position:fixed;bottom:calc(var(--bn-h,60px) + 10px);left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#2a1d08,#3a2808);border:1px solid rgba(212,168,75,.3);border-radius:12px;padding:12px 20px;display:flex;align-items:center;gap:14px;z-index:1000;box-shadow:0 8px 28px rgba(0,0,0,.5);animation:toastIn .25s ease;max-width:340px;width:90%;`;
+  banner.innerHTML = `
+    <i class="fa-solid fa-mobile-screen-button" style="color:#d4a84b;font-size:1.2rem;flex-shrink:0"></i>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:.83rem;font-weight:700;color:#f0ece4">Install Joyalty Admin</div>
+      <div style="font-size:.72rem;color:rgba(240,236,228,.5)">Add to home screen for quick access</div>
+    </div>
+    <button onclick="installPWA()" style="background:linear-gradient(135deg,#b8860b,#d4a84b);color:#0a0810;border:none;border-radius:8px;padding:7px 14px;font-family:'Quicksand',sans-serif;font-weight:700;font-size:.78rem;cursor:pointer;flex-shrink:0">Install</button>
+    <button onclick="this.parentElement.remove()" style="background:none;border:none;color:rgba(240,236,228,.4);cursor:pointer;font-size:.9rem;padding:2px 4px;flex-shrink:0"><i class="fa-solid fa-xmark"></i></button>`;
+  document.body.appendChild(banner);
+}
+
+async function installPWA() {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const result = await deferredPrompt.userChoice;
+  if (result.outcome === "accepted") toast("App installed! ✓", "success");
+  deferredPrompt = null;
+  document.getElementById("pwaInstallBanner")?.remove();
+}
+
+// ── Init — user already authenticated via guard in index.html ─
+function init() {
+  const u = currentUser;
+  if (!u) return;
+
+  const init = (u.displayName || u.email || "A")[0].toUpperCase();
+  setText("sbAvatar", init);
+  setText("sbName", u.displayName || u.email.split("@")[0]);
+  setText("avaPreview", init);
+  setVal("profileEmail", u.email || "");
+  setVal("profileName", ls("adminDisplayName") || u.displayName || "");
+  setVal("profileStudio", ls("adminStudio") || "");
+  setVal("profilePhone", ls("adminPhone") || "");
+  const savedAva = ls("adminAva");
+  if (savedAva) setAvaImg(savedAva);
+
+  loadPrefsUI();
+  subscribeRealtime();
+  subscribePresence();
+  initDash();
+  switchTab(sessionStorage.getItem("adminTab") || "overview", true);
+}
+init();
+
+async function doLogout() {
+  if (rtChannel && sbClient) sbClient.removeChannel(rtChannel);
+  if (presenceChannel && sbClient) sbClient.removeChannel(presenceChannel);
+  await window.joyaltyAuth.firebaseSignOut().catch(() => {});
+  window.location.replace("/admin/login/");
+}
 
 // ═══════════════════════════════════════════════════════════════
-// SUPABASE REALTIME
+// REALTIME + PRESENCE
 // ═══════════════════════════════════════════════════════════════
 function subscribeRealtime() {
   if (!sbClient) return;
@@ -69,123 +129,163 @@ function subscribeRealtime() {
           updateBadges();
           loadSessions();
           if (prefs.chatNotif !== false) {
-            pushNotif("New message from " + (msg.name || "a client"), msg.text);
-            if (prefs.soundNotif) beep();
+            triggerNotification(
+              `New message from ${msg.name || "a client"}`,
+              msg.text,
+              msg.session_id,
+            );
+            if (prefs.soundNotif !== false) playSound("receive");
           }
         }
       },
     )
-    .subscribe((status) => {
-      console.log("[realtime] status:", status);
+    .subscribe();
+}
+
+function subscribePresence() {
+  if (!sbClient) return;
+  if (presenceChannel) sbClient.removeChannel(presenceChannel);
+  presenceChannel = sbClient
+    .channel("user-presence")
+    .on("presence", { event: "sync" }, () => {
+      const state = presenceChannel.presenceState();
+      onlineUsers = {};
+      Object.keys(state).forEach((key) => {
+        onlineUsers[key] = true;
+      });
+      updateOnlineIndicators();
+    })
+    .on("presence", { event: "join" }, ({ key }) => {
+      onlineUsers[key] = true;
+      updateOnlineIndicators();
+    })
+    .on("presence", { event: "leave" }, ({ key }) => {
+      delete onlineUsers[key];
+      updateOnlineIndicators();
+    })
+    .subscribe(async (status) => {
+      if (status === "SUBSCRIBED") {
+        // Admin tracks as "admin"
+        await presenceChannel.track({
+          user: "admin",
+          online_at: new Date().toISOString(),
+        });
+      }
     });
 }
 
-// ═══════════════════════════════════════════════════════════════
-// AUTH — Firebase persistence prevents login flash on refresh
-// ═══════════════════════════════════════════════════════════════
-function showApp(user) {
-  currentUser = user;
-  // Hide login, show app — but keep login hidden via CSS initially
-  // so there's no visible flash
-  g("loginScreen").style.display = "none";
-  g("adminApp").style.display = "flex";
-
-  const init = (user.displayName || user.email || "A")[0].toUpperCase();
-  setText("sbAvatar", init);
-  setText("sbName", user.displayName || user.email.split("@")[0]);
-  setText("avaPreview", init);
-  setVal("profileEmail", user.email || "");
-  setVal("profileName", ls("adminDisplayName") || user.displayName || "");
-  setVal("profileStudio", ls("adminStudio") || "");
-  setVal("profilePhone", ls("adminPhone") || "");
-
-  const savedAva = ls("adminAva");
-  if (savedAva) setAvaImg(savedAva);
-
-  loadPrefsUI();
-  subscribeRealtime();
-  initDash();
-  switchTab(sessionStorage.getItem("adminTab") || "overview", true);
+function updateOnlineIndicators() {
+  // Update online dot for active session
+  if (activeSession && activeSession !== "joy") {
+    const isOnline = !!onlineUsers[activeSession];
+    const dot = document.getElementById("onlineDot");
+    const status = document.getElementById("onlineStatus");
+    if (dot) dot.style.display = isOnline ? "" : "none";
+    if (status)
+      status.textContent = isOnline
+        ? "Online now"
+        : `Live · ${activeSession.split("-")[0]}`;
+  }
+  // Update badges in contact list
+  document.querySelectorAll(".contact-item[data-sid]").forEach((el) => {
+    const sid = el.dataset.sid;
+    const dot = el.querySelector(".c-online");
+    if (dot) dot.style.display = onlineUsers[sid] ? "" : "none";
+  });
 }
 
-function showLogin(err) {
-  g("adminApp").style.display = "none";
-  g("loginScreen").style.display = "flex";
-  if (err) {
-    const el = g("loginError");
-    if (el) {
-      el.textContent = err;
-      el.style.display = "block";
+// ═══════════════════════════════════════════════════════════════
+// NOTIFICATIONS — properly triggers push + in-app
+// ═══════════════════════════════════════════════════════════════
+async function triggerNotification(title, body, sessionId) {
+  // In-app badge already handled by caller
+  if (!prefs.pushEnabled) return;
+
+  const permission = Notification.permission;
+  if (permission !== "granted") return;
+
+  // Use service worker for reliable background notifications
+  if ("serviceWorker" in navigator) {
+    const reg = await navigator.serviceWorker.getRegistration("/admin/");
+    if (reg) {
+      reg.showNotification(title, {
+        body,
+        icon: "/admin/icons/icon-192.png",
+        badge: "/admin/icons/icon-192.png",
+        tag: sessionId || "joyalty-chat",
+        renotify: true,
+        data: { url: "/admin/", sessionId },
+        actions: [{ action: "open", title: "Open Chat" }],
+      });
+      return;
     }
   }
+  // Fallback to basic Notification
+  try {
+    new Notification(title, { body, icon: "/admin/icons/icon-192.png" });
+  } catch (_) {}
 }
 
-async function doLogin() {
-  const email = getVal("loginEmail"),
-    pass = getVal("loginPass");
-  const errEl = g("loginError"),
-    btn = g("loginBtnText");
-  if (errEl) errEl.style.display = "none";
-  if (!email || !pass) {
-    if (errEl) {
-      errEl.textContent = "Enter your email and password.";
-      errEl.style.display = "block";
-    }
+async function requestNotifPerm() {
+  if (!("Notification" in window)) {
+    toast("Notifications not supported.", "error");
     return;
   }
-  if (btn) btn.innerHTML = '<span class="spinner"></span>';
-  try {
-    const user = await window.joyaltyAuth.firebaseSignIn(email, pass);
-    showApp(user);
-  } catch (e) {
-    if (btn) btn.textContent = "Sign In";
-    const msg =
-      e.code === "auth/wrong-password" || e.code === "auth/user-not-found"
-        ? "Incorrect email or password."
-        : e.message || "Login failed.";
-    if (errEl) {
-      errEl.textContent = msg;
-      errEl.style.display = "block";
-    }
+  const p = await Notification.requestPermission();
+  if (p === "granted") {
+    toast("Notifications enabled ✓", "success");
+    g("notifDot").style.display = "";
+    g("pushToggle").checked = true;
+    savePref("pushEnabled", true);
+    prefs.pushEnabled = true;
+    setText("notifStatus", "Push notifications are enabled.");
+  } else {
+    toast("Permission denied.", "error");
+    setText("notifStatus", "Please enable in browser settings.");
+  }
+}
+function togglePush(on) {
+  if (on) requestNotifPerm();
+  else {
+    savePref("pushEnabled", false);
+    prefs.pushEnabled = false;
+    setText("notifStatus", "Disabled.");
   }
 }
 
-async function doLogout() {
-  if (rtChannel && sbClient) sbClient.removeChannel(rtChannel);
-  await window.joyaltyAuth.firebaseSignOut().catch(() => {});
-  currentUser = null;
-  sessionStorage.removeItem("adminTab");
-  showLogin();
-  setVal("loginEmail", "");
-  setVal("loginPass", "");
+// ═══════════════════════════════════════════════════════════════
+// SOUND
+// ═══════════════════════════════════════════════════════════════
+function playSound(type) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    if (type === "send") {
+      // Subtle ascending two-tone for sent
+      osc.frequency.setValueAtTime(600, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(900, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.18, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.18);
+    } else {
+      // Gentle descending pop for receive
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.14);
+      gain.gain.setValueAtTime(0.22, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.28);
+    }
+  } catch (_) {}
 }
-
-function togglePw() {
-  const inp = g("loginPass"),
-    ico = g("pwIcon");
-  if (!inp) return;
-  inp.type = inp.type === "password" ? "text" : "password";
-  if (ico)
-    ico.className =
-      inp.type === "text" ? "fa-solid fa-eye-slash" : "fa-solid fa-eye";
-}
-
-g("loginPass")?.addEventListener("keypress", (e) => {
-  if (e.key === "Enter") doLogin();
-});
-
-// ── KEY FIX: checkAuthState runs immediately on page load.
-// Firebase persists the session in IndexedDB, so on refresh it calls
-// onLoggedIn immediately — the login screen never shows.
-// We hide loginScreen via CSS initially (display:none set on the element
-// itself in HTML, not via body class) to prevent any flash.
-window.joyaltyAuth.checkAuthState(
-  (user) => showApp(user),
-  () => showLogin(),
-);
 
 // ═══════════════════════════════════════════════════════════════
-// TABS
+// TABS — smooth CSS transition
 // ═══════════════════════════════════════════════════════════════
 const TITLES = {
   overview: "Overview",
@@ -198,25 +298,50 @@ const TITLES = {
 };
 
 function switchTab(tab, silent) {
-  document.querySelectorAll(".tab").forEach(s => s.classList.remove("active"));
-  document.querySelectorAll(".nav-item[data-tab],.bn-item[data-tab]").forEach(n => {
-    n.classList.toggle("active", n.dataset.tab === tab);
-  });
-  g("tab-"+tab)?.classList.add("active");
+  const current = document.querySelector(".tab.active");
+  const next = g("tab-" + tab);
+  if (!next || next === current) return;
+
+  // Fade out current
+  if (current) {
+    current.style.opacity = "0";
+    current.style.transform = "translateY(6px)";
+    setTimeout(() => current.classList.remove("active"), 160);
+  }
+
+  // Fade in next
+  setTimeout(
+    () => {
+      next.classList.add("active");
+      next.style.opacity = "0";
+      next.style.transform = "translateY(6px)";
+      requestAnimationFrame(() => {
+        next.style.transition = "opacity .2s ease, transform .2s ease";
+        next.style.opacity = "1";
+        next.style.transform = "translateY(0)";
+      });
+    },
+    current ? 160 : 0,
+  );
+
+  document
+    .querySelectorAll(".nav-item[data-tab],.bn-item[data-tab]")
+    .forEach((n) => n.classList.toggle("active", n.dataset.tab === tab));
   setText("tabTitle", TITLES[tab] || tab);
   if (!silent) sessionStorage.setItem("adminTab", tab);
- 
-  // ── Chat mode class — lets CSS give the chat panel full height
-  //    without bleeding into other tabs (fallback for no :has())
+
+  // Chat mode toggle for CSS :has() fallback
   const pc = document.querySelector(".page-content");
   if (pc) pc.classList.toggle("chat-mode", tab === "chat");
- 
-  if (tab === "bookings")  loadBookings();
-  if (tab === "clients")   loadClients();
+
+  if (tab === "bookings") loadBookings();
+  if (tab === "clients") loadClients();
   if (tab === "analytics") renderAnalytics();
-  if (tab === "chat")      { initChat(); resetUnread(); }
+  if (tab === "chat") {
+    initChat();
+    resetUnread();
+  }
 }
- 1
 
 document
   .querySelectorAll(".nav-item[data-tab],.bn-item[data-tab]")
@@ -255,7 +380,7 @@ async function loadStats() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// BOOKINGS
+// BOOKINGS — CRUD  (DELETE fix: correct URL parsing)
 // ═══════════════════════════════════════════════════════════════
 async function loadBookings() {
   try {
@@ -281,7 +406,7 @@ function renderBookings(rows) {
   tb.innerHTML = rows
     .map(
       (b) => `
-    <tr>
+    <tr class="booking-row" data-id="${b.id}">
       <td style="font-family:monospace;font-size:.76rem">${esc(b.booking_ref)}</td>
       <td><div style="font-weight:600">${esc(b.client_name || "—")}</div><div style="font-size:.72rem;color:var(--muted)">${esc(b.client_email || "")}</div></td>
       <td>${esc(b.service_name || "—")}</td>
@@ -289,13 +414,24 @@ function renderBookings(rows) {
       <td style="font-weight:600">KSh ${Number(b.total_price || 0).toLocaleString()}</td>
       <td>${badge(b.status)}</td>
       <td style="white-space:nowrap">
-        <button class="act-btn edit" onclick="openEditBooking(${b.id})" title="Edit"><i class="fa-solid fa-pen"></i></button>
+        <button class="act-btn edit" onclick="openEditBooking(${b.id})"   title="Edit"><i class="fa-solid fa-pen"></i></button>
         <button class="act-btn"      onclick="emailShortcut('${esc(b.client_email)}','${esc(b.booking_ref)}')" title="Email"><i class="fa-solid fa-envelope"></i></button>
         <button class="act-btn del"  onclick="openDeleteBooking(${b.id})" title="Delete"><i class="fa-solid fa-trash"></i></button>
       </td>
     </tr>`,
     )
     .join("");
+
+  // Animate rows in
+  document.querySelectorAll(".booking-row").forEach((row, i) => {
+    row.style.opacity = "0";
+    row.style.transform = "translateY(8px)";
+    row.style.transition = `opacity .2s ease ${i * 30}ms, transform .2s ease ${i * 30}ms`;
+    requestAnimationFrame(() => {
+      row.style.opacity = "1";
+      row.style.transform = "none";
+    });
+  });
 }
 
 function badge(s) {
@@ -351,6 +487,7 @@ function selByText(id, txt) {
     }
   }
 }
+
 async function submitBooking() {
   const body = {
     clientName: getVal("bm-name"),
@@ -386,27 +523,62 @@ async function submitBooking() {
     showAlert("bmAlert", e.message, "error");
   }
 }
+
+// ── DELETE FIX: send booking id via hidden field, then DELETE ──
 function openDeleteBooking(id) {
-  setVal("deleteId", id);
+  setVal("deleteId", String(id));
+  // Show booking ref in modal for confirmation
+  const b = allBookings.find((x) => x.id === id);
+  const modal = g("deleteModal");
+  if (modal && b) {
+    const p = modal.querySelector(".modal-body p");
+    if (p)
+      p.innerHTML = `Delete booking <strong style="color:var(--gold)">${esc(b.booking_ref)}</strong> for <strong>${esc(b.client_name || "")}</strong>?<br><span style="font-size:.8rem;opacity:.6">This cannot be undone.</span>`;
+  }
   openModal("deleteModal");
 }
+
 async function confirmDelete() {
   const id = getVal("deleteId");
+  if (!id) {
+    toast("No booking selected.", "error");
+    return;
+  }
+
+  const btn = g("confirmDeleteBtn");
+  if (btn) btn.innerHTML = '<span class="spinner"></span>';
+
   try {
     const d = await api(`/api/admin/bookings/${id}`, { method: "DELETE" });
     closeModal("deleteModal");
+    if (btn) btn.textContent = "Yes, Delete";
+
     if (d.success) {
-      await Promise.all([loadBookings(), loadStats()]);
+      // Animate row out before removing
+      const row = document.querySelector(`.booking-row[data-id="${id}"]`);
+      if (row) {
+        row.style.transition = "opacity .25s ease, transform .25s ease";
+        row.style.opacity = "0";
+        row.style.transform = "translateX(-20px)";
+        setTimeout(() => row.remove(), 260);
+      }
+      allBookings = allBookings.filter((b) => String(b.id) !== id);
+      await loadStats();
       toast("Booking deleted.", "success");
-    } else toast(d.error || "Delete failed.", "error");
+    } else {
+      toast(d.error || "Delete failed. Check the booking exists.", "error");
+      console.error("[delete]", d.error);
+    }
   } catch (e) {
+    if (btn) btn.textContent = "Yes, Delete";
     closeModal("deleteModal");
-    toast(e.message, "error");
+    toast("Delete failed: " + e.message, "error");
+    console.error("[delete]", e);
   }
 }
 
 // ═══════════════════════════════════════════════════════════════
-// CLIENTS + SEARCH
+// CLIENTS
 // ═══════════════════════════════════════════════════════════════
 async function loadClients() {
   try {
@@ -503,7 +675,7 @@ function setChatMode(mode) {
 
 function renderBotContact() {
   g("contactList").innerHTML =
-    `<div class="contact-item active" id="botItem" onclick="selectBot(this)"><div class="c-ava bot"><i class="fa-solid fa-robot"></i></div><div><div class="c-name">Joy — AI Assistant</div><div class="c-prev">Live data: bookings, revenue, clients</div></div></div>`;
+    `<div class="contact-item active" id="botItem" onclick="selectBot(this)"><div class="c-ava bot"><i class="fa-solid fa-robot"></i></div><div><div class="c-name">Joy — AI Assistant</div><div class="c-prev">Live data: bookings, revenue…</div></div></div>`;
   selectBot(g("botItem"));
 }
 function selectBot(el) {
@@ -513,13 +685,16 @@ function selectBot(el) {
   el.classList.add("active");
   activeSession = "joy";
   setText("chatHdName", "Joy — AI Assistant");
-  setText("chatHdSub", "Gemini · live dashboard context");
   g("chatHdAva").className = "chat-ava bot";
   g("chatHdAva").innerHTML = '<i class="fa-solid fa-robot"></i>';
+  const dot = g("onlineDot"),
+    st = g("onlineStatus");
+  if (dot) dot.style.display = "none";
+  if (st) st.textContent = "Gemini · live context";
   g("adminMsgs").innerHTML = "";
   aiConvo = [];
   appendMsg(
-    "Hi Admin 👋 I have your live bookings, clients and revenue data. Ask me anything.",
+    "Hi Admin 👋 I have your live bookings and client data. Ask me anything.",
     "in",
     "🤖",
   );
@@ -537,28 +712,46 @@ async function loadSessions() {
 function renderContacts(sessions) {
   const list = g("contactList");
   if (!sessions.length) {
-    list.innerHTML = `<div class="empty-state" style="padding:20px 14px;font-size:.81rem">No live sessions yet.</div>`;
+    list.innerHTML = `<div class="empty-state" style="padding:18px 14px;font-size:.81rem">No live sessions yet.</div>`;
     return;
   }
   list.innerHTML = sessions
     .map((s) => {
       const name = s.name || s.session_id.split("-")[0];
-      return `<div class="contact-item${s.session_id === activeSession ? " active" : ""}" onclick="selectSession('${esc(s.session_id)}','${esc(name)}')"><div class="c-ava">${name[0].toUpperCase()}</div><div style="min-width:0;flex:1"><div class="c-name">${esc(name)}</div><div class="c-prev">${esc((s.last_text || "").substring(0, 34))}</div></div>${s.unread > 0 ? `<span class="c-unread">${s.unread}</span>` : ""}</div>`;
+      const isOnline = !!onlineUsers[s.session_id];
+      return `<div class="contact-item${s.session_id === activeSession ? " active" : ""}" data-sid="${esc(s.session_id)}" onclick="selectSession('${esc(s.session_id)}','${esc(name)}')">
+      <div style="position:relative">
+        <div class="c-ava">${name[0].toUpperCase()}</div>
+        <span class="c-online" style="display:${isOnline ? "" : "none"};position:absolute;bottom:0;right:0;width:9px;height:9px;background:#22c55e;border-radius:50%;border:2px solid var(--bg)"></span>
+      </div>
+      <div style="min-width:0;flex:1"><div class="c-name">${esc(name)}</div><div class="c-prev">${esc((s.last_text || "").substring(0, 34))}</div></div>
+      ${s.unread > 0 ? `<span class="c-unread">${s.unread}</span>` : ""}
+    </div>`;
     })
     .join("");
 }
+
 async function selectSession(sid, name) {
   document
     .querySelectorAll(".contact-item")
     .forEach((e) => e.classList.remove("active"));
   document
-    .querySelector(`.contact-item[onclick*="${sid}"]`)
+    .querySelector(`.contact-item[data-sid="${sid}"]`)
     ?.classList.add("active");
   activeSession = sid;
   setText("chatHdName", name || sid.split("-")[0]);
-  setText("chatHdSub", "Live · " + sid);
   g("chatHdAva").className = "chat-ava";
   g("chatHdAva").textContent = (name || "?")[0].toUpperCase();
+  // Online status
+  const dot = g("onlineDot"),
+    st = g("onlineStatus");
+  const isOnline = !!onlineUsers[sid];
+  if (dot) {
+    dot.style.display = isOnline ? "" : "";
+  }
+  if (st) {
+    st.textContent = isOnline ? "Online now" : `Live · ${sid.split("-")[0]}`;
+  }
   g("adminMsgs").innerHTML = "";
   try {
     const d = await api(`/api/live-chat?sessionId=${encodeURIComponent(sid)}`);
@@ -567,9 +760,10 @@ async function selectSession(sid, name) {
   showChat();
 }
 
+// ── Render bubble with dedup ──────────────────────────────────
 function renderBubble(msg) {
   const msgs = g("adminMsgs");
-  if (msgs.querySelector(`[data-msg-id="${msg.id}"]`)) return; // ← dedup
+  if (msgs.querySelector(`[data-msg-id="${msg.id}"]`)) return;
   const isOut = msg.sender === "admin";
   const time = new Date(msg.timestamp || Date.now()).toLocaleTimeString(
     "en-KE",
@@ -578,24 +772,48 @@ function renderBubble(msg) {
   const div = document.createElement("div");
   div.className = `msg ${isOut ? "out" : "in"}`;
   div.dataset.msgId = msg.id;
+  div.style.opacity = "0";
+  div.style.transform = `translateY(10px) scale(.97)`;
   div.innerHTML = `<div class="msg-ava">${isOut ? "A" : (msg.name || "?")[0].toUpperCase()}</div><div class="msg-col"><div class="msg-bubble">${esc(msg.text)}</div><div class="msg-time">${isOut ? "You" : "Client"} · ${time}</div></div>`;
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
+  // Animate in
+  requestAnimationFrame(() => {
+    div.style.transition =
+      "opacity .2s ease,transform .2s cubic-bezier(.34,1.2,.64,1)";
+    div.style.opacity = "1";
+    div.style.transform = "none";
+  });
 }
 
+// ── Typing indicator ──────────────────────────────────────────
+function showTyping(label) {
+  removeTyping();
+  const msgs = g("adminMsgs");
+  const el = document.createElement("div");
+  el.className = "typing";
+  el.id = "adminTyping";
+  el.innerHTML = `<span></span><span></span><span></span><span style="margin-left:6px;font-size:.72rem;color:var(--muted);white-space:nowrap">${label || "typing…"}</span>`;
+  msgs.appendChild(el);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+function removeTyping() {
+  g("adminTyping")?.remove();
+}
+
+// ── Send message ──────────────────────────────────────────────
 async function sendAdminMsg() {
   const input = g("adminInput");
   const text = input.value.trim();
   if (!text) return;
   input.value = "";
 
-  // ── Joy AI ──────────────────────────────────────────────────
   if (activeSession === "joy" || chatMode === "bot") {
     aiConvo.push({ type: "user", text });
     appendMsg(text, "out", "A");
-    const ctx = `You are Joy, AI assistant for Joyalty Photography admin dashboard.
-LIVE DATA: Total bookings: ${allBookings.length}, Confirmed: ${allBookings.filter((b) => b.status === "confirmed").length}, Pending: ${allBookings.filter((b) => b.status === "pending_payment").length}, Revenue: KSh ${allBookings.reduce((a, b) => a + Number(b.deposit_paid || 0), 0).toLocaleString()}, Clients: ${allClients.length}. Today: ${new Date().toLocaleDateString("en-KE", { dateStyle: "full" })}.
-Be concise and helpful.`;
+    playSound("send");
+    const ctx = `You are Joy, AI assistant for Joyalty Photography admin.
+LIVE DATA: Bookings: ${allBookings.length}, Confirmed: ${allBookings.filter((b) => b.status === "confirmed").length}, Pending: ${allBookings.filter((b) => b.status === "pending_payment").length}, Revenue: KSh ${allBookings.reduce((a, b) => a + Number(b.deposit_paid || 0), 0).toLocaleString()}, Clients: ${allClients.length}. Today: ${new Date().toLocaleDateString("en-KE", { dateStyle: "full" })}.`;
     const formatted = [
       { role: "user", parts: [{ text: ctx }] },
       ...aiConvo
@@ -606,29 +824,24 @@ Be concise and helpful.`;
         })),
       { role: "user", parts: [{ text }] },
     ];
-    const tp = document.createElement("div");
-    tp.className = "typing";
-    tp.id = "adminTyping";
-    tp.innerHTML = "<span></span><span></span><span></span>";
-    g("adminMsgs").appendChild(tp);
-    g("adminMsgs").scrollTop = 99999;
+    showTyping("Joy is typing");
     try {
       const res = await api("/api/gemini-chat", {
         method: "POST",
         body: JSON.stringify({ messages: formatted }),
       });
-      tp.remove();
+      removeTyping();
       const reply = res.reply || "I couldn't respond.";
       aiConvo.push({ type: "bot", text: reply });
       appendMsg(reply, "in", "🤖");
+      playSound("receive");
     } catch (_) {
-      tp.remove();
+      removeTyping();
       appendMsg("Connection error.", "in", "⚠");
     }
     return;
   }
 
-  // ── Live reply ──────────────────────────────────────────────
   if (!activeSession) return;
   const tempId = "tmp-" + Date.now();
   renderBubble({
@@ -639,6 +852,8 @@ Be concise and helpful.`;
     timestamp: new Date().toISOString(),
   });
   sentIds.add(tempId);
+  playSound("send");
+
   try {
     const res = await api("/api/live-chat", {
       method: "POST",
@@ -668,17 +883,24 @@ function appendMsg(text, dir, ava) {
   });
   const div = document.createElement("div");
   div.className = `msg ${dir}`;
+  div.style.opacity = "0";
+  div.style.transform = "translateY(10px) scale(.97)";
   div.innerHTML = `<div class="msg-ava">${ava || (dir === "out" ? "A" : "?")}</div><div class="msg-col"><div class="msg-bubble">${esc(text)}</div><div class="msg-time">${time}</div></div>`;
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
+  requestAnimationFrame(() => {
+    div.style.transition =
+      "opacity .2s ease,transform .2s cubic-bezier(.34,1.2,.64,1)";
+    div.style.opacity = "1";
+    div.style.transform = "none";
+  });
 }
+
 function clearChat() {
   aiConvo = [];
   g("adminMsgs").innerHTML = "";
-  if (chatMode === "bot")
-    appendMsg("Chat cleared. Ask me anything.", "in", "🤖");
+  if (chatMode === "bot") appendMsg("Chat cleared.", "in", "🤖");
 }
-
 function showChat() {
   if (window.innerWidth <= 768) {
     g("chatContacts")?.classList.add("hidden");
@@ -691,7 +913,6 @@ function showContacts() {
     g("chatMain")?.classList.add("hidden");
   }
 }
-
 function updateBadges() {
   ["chatBadgeSB", "bnChat"].forEach((id) => {
     const el = g(id);
@@ -706,54 +927,255 @@ function resetUnread() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// PUSH NOTIFICATIONS
+// CHARTS — real data from DB
 // ═══════════════════════════════════════════════════════════════
-async function requestNotifPerm() {
-  if (!("Notification" in window)) {
-    toast("Not supported.", "error");
-    return;
-  }
-  const p = await Notification.requestPermission();
-  if (p === "granted") {
-    toast("Notifications enabled ✓", "success");
-    g("notifDot").style.display = "";
-    g("pushToggle").checked = true;
-    savePref("pushEnabled", true);
-    prefs.pushEnabled = true;
-    setText("notifStatus", "Notifications are enabled.");
-  } else {
-    toast("Permission denied.", "error");
-    setText("notifStatus", "Enable in browser settings.");
-  }
+let charts = {};
+
+async function renderOverviewCharts() {
+  const mo = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  const now = new Date().getMonth();
+  const labels = mo.slice(Math.max(0, now - 5), now + 1);
+
+  // Build real booking counts per month from allBookings
+  const bkCounts = labels.map((lbl) => {
+    const mIdx = mo.indexOf(lbl);
+    return allBookings.filter((b) => {
+      const d = b.created_at ? new Date(b.created_at) : null;
+      return d && d.getMonth() === mIdx;
+    }).length;
+  });
+
+  const rvData = labels.map((lbl) => {
+    const mIdx = mo.indexOf(lbl);
+    return allBookings
+      .filter((b) => {
+        const d = b.created_at ? new Date(b.created_at) : null;
+        return d && d.getMonth() === mIdx && b.status === "confirmed";
+      })
+      .reduce((sum, b) => sum + Number(b.deposit_paid || 0), 0);
+  });
+
+  dc("bookingsChart");
+  charts.bk = new Chart(g("bookingsChart"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Bookings",
+          data: bkCounts,
+          backgroundColor: "rgba(212,168,75,.32)",
+          borderColor: "#d4a84b",
+          borderWidth: 1.5,
+          borderRadius: 5,
+        },
+      ],
+    },
+    options: cOpts(),
+  });
+
+  const sc = {};
+  allBookings.forEach((b) => {
+    const s = b.service_name || "Other";
+    sc[s] = (sc[s] || 0) + 1;
+  });
+  const sl = Object.keys(sc).length
+    ? Object.keys(sc)
+    : ["Wedding", "Portrait", "Commercial", "Event"];
+  const sd = Object.keys(sc).length ? Object.values(sc) : [0, 0, 0, 0];
+  dc("servicesChart");
+  charts.svc = new Chart(g("servicesChart"), {
+    type: "doughnut",
+    data: {
+      labels: sl,
+      datasets: [
+        {
+          data: sd,
+          backgroundColor: [
+            "#d4a84b",
+            "#7c6ef0",
+            "#22c55e",
+            "#ef4444",
+            "#f59e0b",
+            "#06b6d4",
+          ],
+          borderWidth: 0,
+        },
+      ],
+    },
+    options: {
+      plugins: {
+        legend: {
+          position: "bottom",
+          labels: { color: "#8892a4", font: { size: 11 }, padding: 9 },
+        },
+      },
+    },
+  });
+
+  dc("revenueChart");
+  charts.rv = new Chart(g("revenueChart"), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Revenue",
+          data: rvData,
+          borderColor: "#22c55e",
+          backgroundColor: "rgba(34,197,94,.08)",
+          fill: true,
+          tension: 0.4,
+          pointBackgroundColor: "#22c55e",
+          pointRadius: 3,
+        },
+      ],
+    },
+    options: cOpts({ yTick: (v) => `${(v / 1000).toFixed(0)}K` }),
+  });
 }
-function togglePush(on) {
-  if (on) requestNotifPerm();
-  else {
-    savePref("pushEnabled", false);
-    prefs.pushEnabled = false;
-    setText("notifStatus", "Disabled.");
-  }
+
+async function renderAnalytics() {
+  const sc = { pending: 0, confirmed: 0, cancelled: 0, completed: 0 };
+  allBookings.forEach((b) => {
+    if (sc[b.status] !== undefined) sc[b.status]++;
+  });
+  dc("statusChart");
+  charts.st = new Chart(g("statusChart"), {
+    type: "pie",
+    data: {
+      labels: ["Pending", "Confirmed", "Cancelled", "Completed"],
+      datasets: [
+        {
+          data: Object.values(sc),
+          backgroundColor: ["#f59e0b", "#22c55e", "#ef4444", "#d4a84b"],
+          borderWidth: 0,
+        },
+      ],
+    },
+    options: {
+      plugins: {
+        legend: {
+          position: "bottom",
+          labels: { color: "#8892a4", font: { size: 11 } },
+        },
+      },
+    },
+  });
+
+  const svcMap = {};
+  allBookings.forEach((b) => {
+    const s = b.service_name || "Other";
+    svcMap[s] = (svcMap[s] || 0) + 1;
+  });
+  dc("paymentChart");
+  charts.pm = new Chart(g("paymentChart"), {
+    type: "doughnut",
+    data: {
+      labels: Object.keys(svcMap).length ? Object.keys(svcMap) : ["No data"],
+      datasets: [
+        {
+          data: Object.keys(svcMap).length ? Object.values(svcMap) : [1],
+          backgroundColor: [
+            "#d4a84b",
+            "#7c6ef0",
+            "#22c55e",
+            "#ef4444",
+            "#f59e0b",
+          ],
+          borderWidth: 0,
+        },
+      ],
+    },
+    options: {
+      plugins: {
+        legend: {
+          position: "bottom",
+          labels: { color: "#8892a4", font: { size: 11 } },
+        },
+      },
+    },
+  });
+
+  // Monthly revenue from real data
+  const mo = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  const labels = mo.slice(Math.max(0, new Date().getMonth() - 11));
+  const rvMonthly = labels.map((lbl) => {
+    const mIdx = mo.indexOf(lbl);
+    return allBookings
+      .filter((b) => {
+        const d = b.created_at ? new Date(b.created_at) : null;
+        return d && d.getMonth() === mIdx && b.status === "confirmed";
+      })
+      .reduce((sum, b) => sum + Number(b.deposit_paid || 0), 0);
+  });
+  dc("dailyChart");
+  charts.dr = new Chart(g("dailyChart"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Revenue",
+          data: rvMonthly,
+          backgroundColor: "rgba(212,168,75,.32)",
+          borderColor: "#d4a84b",
+          borderWidth: 1.5,
+          borderRadius: 3,
+        },
+      ],
+    },
+    options: cOpts({ yTick: (v) => `${(v / 1000).toFixed(0)}K` }),
+  });
 }
-function pushNotif(title, body) {
-  if (!prefs.pushEnabled || Notification.permission !== "granted") return;
-  try {
-    new Notification(title, { body, icon: "/admin/icons/icon-192.png" });
-  } catch (_) {}
+
+function cOpts(o = {}) {
+  return {
+    plugins: { legend: { display: false } },
+    scales: {
+      y: {
+        beginAtZero: true,
+        grid: { color: "rgba(255,255,255,.04)" },
+        ticks: o.yTick ? { callback: o.yTick } : {},
+        border: { display: false },
+      },
+      x: {
+        grid: { display: false },
+        ticks: o.xLimit ? { maxTicksLimit: o.xLimit } : {},
+        border: { display: false },
+      },
+    },
+  };
 }
-function beep() {
-  try {
-    const c = new (window.AudioContext || window.webkitAudioContext)(),
-      o = c.createOscillator(),
-      gn = c.createGain();
-    o.connect(gn);
-    gn.connect(c.destination);
-    o.frequency.setValueAtTime(880, c.currentTime);
-    o.frequency.exponentialRampToValueAtTime(440, c.currentTime + 0.15);
-    gn.gain.setValueAtTime(0.28, c.currentTime);
-    gn.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.3);
-    o.start();
-    o.stop(c.currentTime + 0.3);
-  } catch (_) {}
+function dc(id) {
+  const c = Chart.getChart(id);
+  if (c) c.destroy();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -796,11 +1218,11 @@ async function changePassword() {
   const np = getVal("newPw"),
     cp = getVal("confirmPw");
   if (!np || np.length < 8) {
-    showAlert("pwAlert", "Min 8 characters.", "error");
+    showAlert("pwAlert", "Min 8 chars.", "error");
     return;
   }
   if (np !== cp) {
-    showAlert("pwAlert", "Passwords do not match.", "error");
+    showAlert("pwAlert", "Passwords don't match.", "error");
     return;
   }
   try {
@@ -829,7 +1251,7 @@ function loadPrefsUI() {
     sn = g("soundToggle");
   if (pt) pt.checked = !!prefs.pushEnabled;
   if (cn) cn.checked = prefs.chatNotif !== false;
-  if (sn) sn.checked = !!prefs.soundNotif;
+  if (sn) sn.checked = prefs.soundNotif !== false;
   const ok = Notification.permission === "granted";
   setText(
     "notifStatus",
@@ -841,214 +1263,6 @@ function loadPrefsUI() {
     const d = g("notifDot");
     if (d) d.style.display = "";
   }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// CHARTS
-// ═══════════════════════════════════════════════════════════════
-let charts = {};
-function renderOverviewCharts() {
-  const mo = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
-  const now = new Date().getMonth(),
-    labels = mo.slice(Math.max(0, now - 5), now + 1);
-  dc("bookingsChart");
-  charts.bk = new Chart(g("bookingsChart"), {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [
-        {
-          label: "Bookings",
-          data: [2, 5, 3, 8, 6, allBookings.length || 1],
-          backgroundColor: "rgba(212,168,75,.3)",
-          borderColor: "#d4a84b",
-          borderWidth: 1.5,
-          borderRadius: 5,
-        },
-      ],
-    },
-    options: cOpts(),
-  });
-  const sc = {};
-  allBookings.forEach((b) => {
-    const s = b.service_name || "Other";
-    sc[s] = (sc[s] || 0) + 1;
-  });
-  const sl = Object.keys(sc).length
-    ? Object.keys(sc)
-    : ["Wedding", "Portrait", "Commercial", "Event"];
-  const sd = Object.keys(sc).length ? Object.values(sc) : [4, 3, 2, 2];
-  dc("servicesChart");
-  charts.svc = new Chart(g("servicesChart"), {
-    type: "doughnut",
-    data: {
-      labels: sl,
-      datasets: [
-        {
-          data: sd,
-          backgroundColor: [
-            "#d4a84b",
-            "#7c6ef0",
-            "#22c55e",
-            "#ef4444",
-            "#f59e0b",
-            "#06b6d4",
-          ],
-          borderWidth: 0,
-        },
-      ],
-    },
-    options: {
-      plugins: {
-        legend: {
-          position: "bottom",
-          labels: { color: "#8892a4", font: { size: 11 }, padding: 9 },
-        },
-      },
-    },
-  });
-  dc("revenueChart");
-  charts.rv = new Chart(g("revenueChart"), {
-    type: "line",
-    data: {
-      labels,
-      datasets: [
-        {
-          label: "Revenue",
-          data: [
-            45e3,
-            90e3,
-            60e3,
-            160e3,
-            120e3,
-            allBookings.reduce((a, b) => a + Number(b.deposit_paid || 0), 0) ||
-              45e3,
-          ],
-          borderColor: "#22c55e",
-          backgroundColor: "rgba(34,197,94,.08)",
-          fill: true,
-          tension: 0.4,
-          pointBackgroundColor: "#22c55e",
-          pointRadius: 3,
-        },
-      ],
-    },
-    options: cOpts({ yTick: (v) => `${(v / 1000).toFixed(0)}K` }),
-  });
-}
-function renderAnalytics() {
-  const sc = { pending: 0, confirmed: 0, cancelled: 0, completed: 0 };
-  allBookings.forEach((b) => {
-    if (sc[b.status] !== undefined) sc[b.status]++;
-  });
-  dc("statusChart");
-  charts.st = new Chart(g("statusChart"), {
-    type: "pie",
-    data: {
-      labels: Object.keys(sc),
-      datasets: [
-        {
-          data: Object.values(sc),
-          backgroundColor: ["#f59e0b", "#22c55e", "#ef4444", "#d4a84b"],
-          borderWidth: 0,
-        },
-      ],
-    },
-    options: {
-      plugins: {
-        legend: {
-          position: "bottom",
-          labels: { color: "#8892a4", font: { size: 11 } },
-        },
-      },
-    },
-  });
-  dc("paymentChart");
-  charts.pm = new Chart(g("paymentChart"), {
-    type: "doughnut",
-    data: {
-      labels: ["M-Pesa", "Pending"],
-      datasets: [
-        {
-          data: [
-            allBookings.filter((b) => b.status === "confirmed").length || 6,
-            allBookings.filter((b) => b.status === "pending_payment").length ||
-              1,
-          ],
-          backgroundColor: ["#22c55e", "#f59e0b"],
-          borderWidth: 0,
-        },
-      ],
-    },
-    options: {
-      plugins: {
-        legend: {
-          position: "bottom",
-          labels: { color: "#8892a4", font: { size: 11 } },
-        },
-      },
-    },
-  });
-  const days = Array.from({ length: 30 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - 29 + i);
-    return d.toLocaleDateString("en-KE", { month: "short", day: "numeric" });
-  });
-  dc("dailyChart");
-  charts.dr = new Chart(g("dailyChart"), {
-    type: "bar",
-    data: {
-      labels: days,
-      datasets: [
-        {
-          label: "Revenue",
-          data: days.map((_, i) =>
-            i === 29 ? 45e3 : i === 28 ? 30e3 : i === 25 ? 18e3 : 0,
-          ),
-          backgroundColor: "rgba(212,168,75,.3)",
-          borderColor: "#d4a84b",
-          borderWidth: 1.5,
-          borderRadius: 2,
-        },
-      ],
-    },
-    options: cOpts({ xLimit: 8, yTick: (v) => `${(v / 1000).toFixed(0)}K` }),
-  });
-}
-function cOpts(o = {}) {
-  return {
-    plugins: { legend: { display: false } },
-    scales: {
-      y: {
-        beginAtZero: true,
-        grid: { color: "rgba(255,255,255,.04)" },
-        ticks: o.yTick ? { callback: o.yTick } : {},
-        border: { display: false },
-      },
-      x: {
-        grid: { display: false },
-        ticks: o.xLimit ? { maxTicksLimit: o.xLimit } : {},
-        border: { display: false },
-      },
-    },
-  };
-}
-function dc(id) {
-  const c = Chart.getChart(id);
-  if (c) c.destroy();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1076,7 +1290,14 @@ function closeMore() {
 // MODALS / ALERTS / TOASTS
 // ═══════════════════════════════════════════════════════════════
 function openModal(id) {
-  g(id)?.classList.add("open");
+  const el = g(id);
+  if (el) {
+    el.classList.add("open");
+    el.style.animation = "none";
+    requestAnimationFrame(() => {
+      el.style.animation = "";
+    });
+  }
 }
 function closeModal(id) {
   g(id)?.classList.remove("open");

@@ -1,5 +1,5 @@
 // functions/api/mpesa.js
-// ✅ Uses bare npm specifier — works with Cloudflare Pages + esbuild
+// Uses bare npm specifier — works with Cloudflare Pages + esbuild
 import { createClient } from "@supabase/supabase-js";
 
 function sb(env) {
