@@ -1,10 +1,10 @@
 // If already logged in, go straight to dashboard
 window.joyaltyAuth.checkAuthState(
   () => {
-    window.location.replace("/admin/");
+    window.location.replace("../"); // → admin/index
   },
   () => {
-    /* not logged in — show form */
+    /* not logged in — stay on login */
   },
 );
 
@@ -13,6 +13,7 @@ async function doLogin() {
   const pass = document.getElementById("loginPass").value;
   const errBox = document.getElementById("errorBox");
   const btn = document.getElementById("btnText");
+
   errBox.style.display = "none";
 
   if (!email || !pass) {
@@ -20,17 +21,20 @@ async function doLogin() {
     errBox.style.display = "block";
     return;
   }
+
   btn.innerHTML = '<span class="spinner"></span>';
 
   try {
     await window.joyaltyAuth.firebaseSignIn(email, pass);
-    window.location.replace("/admin/");
+    window.location.replace("../"); // → admin/index
   } catch (e) {
     btn.textContent = "Sign In";
+
     errBox.textContent =
       e.code === "auth/wrong-password" || e.code === "auth/user-not-found"
         ? "Incorrect email or password."
         : e.message || "Login failed.";
+
     errBox.style.display = "block";
   }
 }
@@ -38,6 +42,7 @@ async function doLogin() {
 function togglePw() {
   const inp = document.getElementById("loginPass");
   const ico = document.getElementById("pwIcon");
+
   inp.type = inp.type === "password" ? "text" : "password";
   ico.className =
     inp.type === "text" ? "fa-solid fa-eye-slash" : "fa-solid fa-eye";
