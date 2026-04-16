@@ -8,15 +8,24 @@ export async function sendReceiptEmails(env, receipt) {
     return;
   }
 
-  const adminEmail  = env.ADMIN_EMAIL  || "joyaltyphotography254@gmail.com";
-  const fromAddress = env.FROM_EMAIL   || "onboarding@resend.dev";
+  const adminEmail = env.ADMIN_EMAIL || "joyaltyphotography254@gmail.com";
+  const fromAddress = env.FROM_EMAIL || "onboarding@resend.dev";
 
   const {
-    receipt_ref, booking_ref,
-    client_name, client_email, client_phone,
-    service_name, package_name, extra_name,
-    event_date, event_time, location,
-    total_price, deposit_paid, balance_due,
+    receipt_ref,
+    booking_ref,
+    client_name,
+    client_email,
+    client_phone,
+    service_name,
+    package_name,
+    extra_name,
+    event_date,
+    event_time,
+    location,
+    total_price,
+    deposit_paid,
+    balance_due,
     payment_ref,
     issued_at,
   } = receipt;
@@ -322,20 +331,28 @@ export async function sendReceiptEmails(env, receipt) {
   const sends = [];
 
   if (client_email) {
-    sends.push(sendEmail(env.RESEND_API_KEY, {
-      from:    `Joyalty Photography <${fromAddress}>`,
-      to:      [client_email],
-      subject: `Your booking is confirmed — ${receipt_ref}`,
-      html:    clientHtml,
-    }).catch(e => console.error("[send-receipt] client email failed:", e.message)));
+    sends.push(
+      sendEmail(env.RESEND_API_KEY, {
+        from: `Joyalty Photography <${fromAddress}>`,
+        to: [client_email],
+        subject: `Your booking is confirmed — ${receipt_ref}`,
+        html: clientHtml,
+      }).catch((e) =>
+        console.error("[send-receipt] client email failed:", e.message),
+      ),
+    );
   }
 
-  sends.push(sendEmail(env.RESEND_API_KEY, {
-    from:    fromAddress,
-    to:      [adminEmail],
-    subject: `💰 New booking payment: ${receipt_ref} — ${client_name}`,
-    html:    adminHtml,
-  }).catch(e => console.error("[send-receipt] admin email failed:", e.message)));
+  sends.push(
+    sendEmail(env.RESEND_API_KEY, {
+      from: fromAddress,
+      to: [adminEmail],
+      subject: `💰 New booking payment: ${receipt_ref} — ${client_name}`,
+      html: adminHtml,
+    }).catch((e) =>
+      console.error("[send-receipt] admin email failed:", e.message),
+    ),
+  );
 
   await Promise.all(sends);
 }
@@ -343,9 +360,12 @@ export async function sendReceiptEmails(env, receipt) {
 // ── Helpers ────────────────────────────────────────────────────
 async function sendEmail(apiKey, { from, to, subject, html }) {
   const res = await fetch("https://api.resend.com/emails", {
-    method:  "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body:    JSON.stringify({ from, to, subject, html }),
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ from, to, subject, html }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data?.message || JSON.stringify(data));
@@ -354,6 +374,8 @@ async function sendEmail(apiKey, { from, to, subject, html }) {
 
 function esc(str) {
   return String(str)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }

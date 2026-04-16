@@ -3,11 +3,17 @@
 import { createClient } from "@supabase/supabase-js";
 
 function sb(env) {
-  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
+  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
+    auth: { persistSession: false },
+  });
 }
 function j(data, status = 200) {
   return new Response(JSON.stringify(data), {
-    status, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+    },
   });
 }
 
@@ -18,25 +24,36 @@ export async function onRequestGet(context) {
 
   const [total, confirmed, pending, revenue] = await Promise.all([
     db.from("bookings").select("id", { count: "exact", head: true }),
-    db.from("bookings").select("id", { count: "exact", head: true }).eq("status", "confirmed"),
-    db.from("bookings").select("id", { count: "exact", head: true }).eq("status", "pending_payment"),
+    db
+      .from("bookings")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "confirmed"),
+    db
+      .from("bookings")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending_payment"),
     db.from("receipts").select("deposit_paid"),
   ]);
 
-  const totalRevenue = (revenue.data || []).reduce((s, r) => s + Number(r.deposit_paid || 0), 0);
+  const totalRevenue = (revenue.data || []).reduce(
+    (s, r) => s + Number(r.deposit_paid || 0),
+    0,
+  );
 
   return j({
-    totalBookings:     total.count     ?? 0,
+    totalBookings: total.count ?? 0,
     confirmedBookings: confirmed.count ?? 0,
-    pendingBookings:   pending.count   ?? 0,
+    pendingBookings: pending.count ?? 0,
     totalRevenue,
   });
 }
 
 export async function onRequestOptions() {
-  return new Response(null, { headers: {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-  }});
+  return new Response(null, {
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
+  });
 }

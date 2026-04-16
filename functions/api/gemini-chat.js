@@ -10,12 +10,12 @@ export async function onRequestPost(context) {
     );
   }
   */
-if (!env.GEMINI_API_KEY) {
-  return new Response(
-    JSON.stringify({ error: "GEMINI_API_KEY is missing from env" }),
-    { status: 200, headers: corsHeaders() } // 200 so you can read it easily
-  );
-}
+  if (!env.GEMINI_API_KEY) {
+    return new Response(
+      JSON.stringify({ error: "GEMINI_API_KEY is missing from env" }),
+      { status: 200, headers: corsHeaders() }, // 200 so you can read it easily
+    );
+  }
   try {
     const { messages } = await request.json();
 
@@ -56,8 +56,9 @@ if (!env.GEMINI_API_KEY) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           system_instruction: {
-            parts: [{
-              text: `You are Joy, the friendly AI assistant for Joyalty Photography Studio based in Nairobi, Kenya.
+            parts: [
+              {
+                text: `You are Joy, the friendly AI assistant for Joyalty Photography Studio based in Nairobi, Kenya.
 You are warm, professional, and concise — never robotic.
 
 SERVICES & PRICING:
@@ -79,16 +80,17 @@ RULES:
 - Never invent services or prices not listed above
 - Keep replies under 3 sentences unless the client asks for detail
 - Always be encouraging and positive about their event or project
-- If asked something outside photography, gently redirect`
-            }]
+- If asked something outside photography, gently redirect`,
+              },
+            ],
           },
           contents: sanitized,
           generationConfig: {
             temperature: 0.7,
             maxOutputTokens: 300,
-          }
-        })
-      }
+          },
+        }),
+      },
     );
 
     // ── Parse Gemini response ──────────────────────────────────
@@ -97,8 +99,11 @@ RULES:
     if (!geminiResponse.ok) {
       console.error("Gemini API error:", JSON.stringify(data));
       return new Response(
-        JSON.stringify({ error: data?.error?.message || "Gemini API error", detail: data }),
-        { status: 502, headers: corsHeaders() }
+        JSON.stringify({
+          error: data?.error?.message || "Gemini API error",
+          detail: data,
+        }),
+        { status: 502, headers: corsHeaders() },
       );
     }
 
@@ -107,13 +112,12 @@ RULES:
       "I'm here to help! Feel free to ask about our services or booking.";
 
     return new Response(JSON.stringify({ reply }), { headers: corsHeaders() });
-
   } catch (err) {
     console.error("Function error:", err.message);
-    return new Response(
-      JSON.stringify({ error: err.message }),
-      { status: 500, headers: corsHeaders() }
-    );
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: corsHeaders(),
+    });
   }
 }
 

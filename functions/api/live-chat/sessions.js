@@ -4,11 +4,17 @@
 import { createClient } from "@supabase/supabase-js";
 
 function sb(env) {
-  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, { auth: { persistSession: false } });
+  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
+    auth: { persistSession: false },
+  });
 }
 function j(data, status = 200) {
   return new Response(JSON.stringify(data), {
-    status, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+    },
   });
 }
 
@@ -33,10 +39,10 @@ export async function onRequestGet(context) {
     if (!map[row.session_id]) {
       map[row.session_id] = {
         session_id: row.session_id,
-        name:       row.name || row.session_id.split("-")[0],
-        last_text:  row.text,
-        last_at:    row.timestamp,
-        unread:     0,
+        name: row.name || row.session_id.split("-")[0],
+        last_text: row.text,
+        last_at: row.timestamp,
+        unread: 0,
       };
     }
     if (row.sender === "user" && !row.read) {
@@ -46,16 +52,18 @@ export async function onRequestGet(context) {
 
   // Sort by most recent first
   const sessions = Object.values(map).sort(
-    (a, b) => new Date(b.last_at) - new Date(a.last_at)
+    (a, b) => new Date(b.last_at) - new Date(a.last_at),
   );
 
   return j({ sessions });
 }
 
 export async function onRequestOptions() {
-  return new Response(null, { headers: {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-  }});
+  return new Response(null, {
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
+  });
 }
