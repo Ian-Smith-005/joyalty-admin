@@ -16,7 +16,7 @@
     rel="stylesheet" />
   <script src="https://kit.fontawesome.com/f3068f95b3.js" crossorigin="anonymous"></script>
   <link rel="shortcut icon" href="https://joyaltyphotography.netlify.app/images/templatemo-logo.png"
-    type="image/x-icon">
+    type="image/x-icon" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -27,18 +27,23 @@
   <!-- Auth guard + config fetch — BEFORE admin.js -->
   <script>
     // 1. Auth guard: redirect to login if not authenticated
-    window.__authReady = new Promise(resolve => {
+    window.__authReady = new Promise((resolve) => {
       window.joyaltyAuth.checkAuthState(
-        user => resolve(user),
-        () => { window.location.replace("/admin/login/"); }
+        (user) => resolve(user),
+        () => {
+          window.location.replace("/admin/login/");
+        },
       );
     });
 
     // 2. Fetch Supabase public config
     window.__configReady = fetch("/api/config")
-      .then(r => r.json())
-      .then(d => { window.SUPABASE_URL = d.supabaseUrl; window.SUPABASE_ANON = d.supabaseAnon; })
-      .catch(e => console.error("[config]", e.message));
+      .then((r) => r.json())
+      .then((d) => {
+        window.SUPABASE_URL = d.supabaseUrl;
+        window.SUPABASE_ANON = d.supabaseAnon;
+      })
+      .catch((e) => console.error("[config]", e.message));
 
     // 3. Load admin.js only after both complete
     Promise.all([window.__authReady, window.__configReady]).then(([user]) => {
@@ -51,31 +56,42 @@
 </head>
 
 <body>
-
   <div id="toastWrap" aria-live="polite"></div>
 
   <!-- Sidebar -->
   <aside class="sidebar" id="sidebar">
     <div class="sb-header">
-      <img src="https://joyaltyphotography.netlify.app/images/templatemo-logo.png" class="sb-logo" alt="">
+      <img src="https://joyaltyphotography.netlify.app/images/templatemo-logo.png" class="sb-logo" alt="" />
       <span class="sb-brand">JO<span>Y</span>ALTY</span>
     </div>
     <nav class="sb-nav">
       <span class="nav-label">Main</span>
-      <button class="nav-item active" data-tab="overview"><i
-          class="fa-solid fa-chart-pie"></i><span>Overview</span></button>
-      <button class="nav-item" data-tab="bookings"><i class="fa-solid fa-calendar-check"></i><span>Bookings</span><span
-          class="nav-badge" id="pendingBadge" style="display:none">0</span></button>
-      <button class="nav-item" data-tab="clients"><i class="fa-solid fa-users"></i><span>Clients</span></button>
+      <button class="nav-item active" data-tab="overview">
+        <i class="fa-solid fa-chart-pie"></i><span>Overview</span>
+      </button>
+      <button class="nav-item" data-tab="bookings">
+        <i class="fa-solid fa-calendar-check"></i><span>Bookings</span><span class="nav-badge" id="pendingBadge"
+          style="display: none">0</span>
+      </button>
+      <button class="nav-item" data-tab="clients">
+        <i class="fa-solid fa-users"></i><span>Clients</span>
+      </button>
       <span class="nav-label">Comms</span>
-      <button class="nav-item" data-tab="email"><i class="fa-solid fa-envelope"></i><span>Email</span></button>
-      <button class="nav-item" data-tab="chat"><i class="fa-solid fa-comments"></i><span>Chat</span><span
-          class="nav-badge chat-badge" id="chatBadgeSB" style="display:none">0</span></button>
+      <button class="nav-item" data-tab="email">
+        <i class="fa-solid fa-envelope"></i><span>Email</span>
+      </button>
+      <button class="nav-item" data-tab="chat">
+        <i class="fa-solid fa-comments"></i><span>Chat</span><span class="nav-badge chat-badge" id="chatBadgeSB"
+          style="display: none">0</span>
+      </button>
       <span class="nav-label">Data</span>
-      <button class="nav-item" data-tab="analytics"><i
-          class="fa-solid fa-chart-line"></i><span>Analytics</span></button>
+      <button class="nav-item" data-tab="analytics">
+        <i class="fa-solid fa-chart-line"></i><span>Analytics</span>
+      </button>
       <span class="nav-label">Account</span>
-      <button class="nav-item" data-tab="profile"><i class="fa-solid fa-user-gear"></i><span>Profile</span></button>
+      <button class="nav-item" data-tab="profile">
+        <i class="fa-solid fa-user-gear"></i><span>Profile</span>
+      </button>
     </nav>
     <div class="sb-footer">
       <div class="admin-chip">
@@ -84,8 +100,9 @@
           <div class="admin-name" id="sbName">Admin</div>
           <div class="admin-role">Administrator</div>
         </div>
-        <button class="btn-signout" onclick="doLogout()" title="Sign out"><i
-            class="fa-solid fa-arrow-right-from-bracket"></i></button>
+        <button class="btn-signout" onclick="doLogout()" title="Sign out">
+          <i class="fa-solid fa-arrow-right-from-bracket"></i>
+        </button>
       </div>
     </div>
   </aside>
@@ -94,16 +111,18 @@
   <!-- Main -->
   <div class="main-wrap">
     <header class="topbar">
-      <button class="hamburger" id="hamburger" onclick="toggleSidebar()"><i class="fa-solid fa-bars"></i></button>
+      <button class="hamburger" id="hamburger" onclick="toggleSidebar()">
+        <i class="fa-solid fa-bars"></i>
+      </button>
       <h1 class="topbar-title" id="tabTitle">Overview</h1>
       <div class="topbar-right">
         <div class="search-box">
           <i class="fa-solid fa-magnifying-glass"></i>
-          <input type="text" id="globalSearch" placeholder="Search…" oninput="onSearch(this.value)">
+          <input type="text" id="globalSearch" placeholder="Search…" oninput="onSearch(this.value)" />
         </div>
         <button class="icon-btn notif-btn" id="notifBtn" onclick="requestNotifPerm()" title="Enable notifications">
           <i class="fa-solid fa-bell"></i>
-          <span class="notif-dot" id="notifDot" style="display:none"></span>
+          <span class="notif-dot" id="notifDot" style="display: none"></span>
         </button>
         <button class="btn-accent-sm" onclick="openCreateBooking()">
           <i class="fa-solid fa-plus"></i><span class="hide-xs"> New</span>
@@ -112,26 +131,31 @@
     </header>
 
     <main class="page-content">
-
       <!-- OVERVIEW -->
       <section class="tab active" id="tab-overview">
         <div class="stats-grid">
           <div class="glass-card stat-card">
-            <div class="stat-ico purple"><i class="fa-solid fa-calendar-check"></i></div>
+            <div class="stat-ico purple">
+              <i class="fa-solid fa-calendar-check"></i>
+            </div>
             <div>
               <div class="stat-val" id="st-total">—</div>
               <div class="stat-lbl">Total Bookings</div>
             </div>
           </div>
           <div class="glass-card stat-card">
-            <div class="stat-ico green"><i class="fa-solid fa-circle-check"></i></div>
+            <div class="stat-ico green">
+              <i class="fa-solid fa-circle-check"></i>
+            </div>
             <div>
               <div class="stat-val" id="st-confirmed">—</div>
               <div class="stat-lbl">Confirmed</div>
             </div>
           </div>
           <div class="glass-card stat-card">
-            <div class="stat-ico amber"><i class="fa-solid fa-clock"></i></div>
+            <div class="stat-ico amber">
+              <i class="fa-solid fa-clock"></i>
+            </div>
             <div>
               <div class="stat-val" id="st-pending">—</div>
               <div class="stat-lbl">Pending</div>
@@ -147,14 +171,17 @@
         </div>
         <div class="chart-row">
           <div class="glass-card chart-card span2">
-            <p class="chart-title">Bookings over time</p><canvas id="bookingsChart" height="110"></canvas>
+            <p class="chart-title">Bookings over time</p>
+            <canvas id="bookingsChart" height="110"></canvas>
           </div>
           <div class="glass-card chart-card">
-            <p class="chart-title">Services breakdown</p><canvas id="servicesChart" height="200"></canvas>
+            <p class="chart-title">Services breakdown</p>
+            <canvas id="servicesChart" height="200"></canvas>
           </div>
         </div>
         <div class="glass-card chart-card mt16">
-          <p class="chart-title">Revenue by month (KSh)</p><canvas id="revenueChart" height="80"></canvas>
+          <p class="chart-title">Revenue by month (KSh)</p>
+          <canvas id="revenueChart" height="80"></canvas>
         </div>
       </section>
 
@@ -164,9 +191,13 @@
         <div class="glass-card table-card">
           <div class="table-hd">
             <h6>All Bookings</h6>
-            <div class="table-hd-btns"><button class="btn-outline-sm" onclick="loadBookings()"><i
-                  class="fa-solid fa-rotate-right"></i></button><button class="btn-accent-sm"
-                onclick="openCreateBooking()"><i class="fa-solid fa-plus"></i> New</button></div>
+            <div class="table-hd-btns">
+              <button class="btn-outline-sm" onclick="loadBookings()">
+                <i class="fa-solid fa-rotate-right"></i></button><button class="btn-accent-sm"
+                onclick="openCreateBooking()">
+                <i class="fa-solid fa-plus"></i> New
+              </button>
+            </div>
           </div>
           <div class="tbl-scroll">
             <table class="admin-table">
@@ -218,15 +249,20 @@
           </div>
           <div class="form-body">
             <div class="field-row">
-              <div class="field-group"><label>To</label><input type="email" id="emailTo" class="field-input"
-                  placeholder="client@email.com"></div>
-              <div class="field-group"><label>Subject</label><input type="text" id="emailSubject" class="field-input"
-                  placeholder="Subject…"></div>
+              <div class="field-group">
+                <label>To</label><input type="email" id="emailTo" class="field-input" placeholder="client@email.com" />
+              </div>
+              <div class="field-group">
+                <label>Subject</label><input type="text" id="emailSubject" class="field-input" placeholder="Subject…" />
+              </div>
             </div>
-            <div class="field-group"><label>Message</label><textarea id="emailBody" class="field-input" rows="8"
-                style="resize:vertical"></textarea></div>
-            <button class="btn-accent-sm" onclick="sendAdminEmail()"><i class="fa-solid fa-paper-plane"></i> Send
-              Email</button>
+            <div class="field-group">
+              <label>Message</label><textarea id="emailBody" class="field-input" rows="8"
+                style="resize: vertical"></textarea>
+            </div>
+            <button class="btn-accent-sm" onclick="sendAdminEmail()">
+              <i class="fa-solid fa-paper-plane"></i> Send Email
+            </button>
           </div>
         </div>
       </section>
@@ -238,33 +274,48 @@
             <div class="contacts-hd">
               <h6>Conversations</h6>
               <div class="mode-toggle">
-                <button class="mt-btn active" id="modeBtnBot" onclick="setChatMode('bot')"><i
-                    class="fa-solid fa-robot"></i> Joy AI</button>
-                <button class="mt-btn" id="modeBtnLive" onclick="setChatMode('live')"><i class="fa-solid fa-signal"></i>
-                  Live</button>
+                <button class="mt-btn active" id="modeBtnBot" onclick="setChatMode('bot')">
+                  <i class="fa-solid fa-robot"></i> Joy AI
+                </button>
+                <button class="mt-btn" id="modeBtnLive" onclick="setChatMode('live')">
+                  <i class="fa-solid fa-signal"></i> Live
+                </button>
               </div>
             </div>
             <div class="contact-list" id="contactList"></div>
           </div>
           <div class="chat-main" id="chatMain">
             <div class="chat-main-hd">
-              <button class="back-btn" onclick="showContacts()"><i class="fa-solid fa-arrow-left"></i></button>
-              <div class="chat-ava bot" id="chatHdAva"><i class="fa-solid fa-robot"></i></div>
+              <button class="back-btn" onclick="showContacts()">
+                <i class="fa-solid fa-arrow-left"></i>
+              </button>
+              <div class="chat-ava bot" id="chatHdAva">
+                <i class="fa-solid fa-robot"></i>
+              </div>
               <div class="chat-hd-info">
-                <div class="chat-hd-name" id="chatHdName">Joy — AI Assistant</div>
+                <div class="chat-hd-name" id="chatHdName">
+                  Joy — AI Assistant
+                </div>
                 <div class="chat-hd-sub" id="chatHdSub">
                   <span class="online-dot" id="onlineDot"></span>
                   <span id="onlineStatus">Gemini · live context</span>
                 </div>
               </div>
-              <button class="icon-btn" onclick="clearChat()" title="Clear"><i class="fa-solid fa-broom"></i></button>
+              <button class="icon-btn" onclick="clearChat()" title="Clear">
+                <i class="fa-solid fa-broom"></i>
+              </button>
             </div>
             <div class="chat-msgs" id="adminMsgs"></div>
             <div class="chat-bar">
-              <input type="text" id="adminInput" class="chat-field" placeholder="Type a message…"
-                onkeypress="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAdminMsg();}">
-              <button class="chat-send" id="adminSendBtn" onclick="sendAdminMsg()"><i
-                  class="fa-solid fa-paper-plane"></i></button>
+              <input type="text" id="adminInput" class="chat-field" placeholder="Type a message…" onkeypress="
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      sendAdminMsg();
+                    }
+                  " />
+              <button class="chat-send" id="adminSendBtn" onclick="sendAdminMsg()">
+                <i class="fa-solid fa-paper-plane"></i>
+              </button>
             </div>
           </div>
         </div>
@@ -274,14 +325,17 @@
       <section class="tab" id="tab-analytics">
         <div class="chart-row">
           <div class="glass-card chart-card">
-            <p class="chart-title">Bookings by status</p><canvas id="statusChart" height="200"></canvas>
+            <p class="chart-title">Bookings by status</p>
+            <canvas id="statusChart" height="200"></canvas>
           </div>
           <div class="glass-card chart-card">
-            <p class="chart-title">Services split</p><canvas id="paymentChart" height="200"></canvas>
+            <p class="chart-title">Services split</p>
+            <canvas id="paymentChart" height="200"></canvas>
           </div>
         </div>
         <div class="glass-card chart-card mt16">
-          <p class="chart-title">Revenue by month — live from DB (KSh)</p><canvas id="dailyChart" height="80"></canvas>
+          <p class="chart-title">Revenue by month — live from DB (KSh)</p>
+          <canvas id="dailyChart" height="80"></canvas>
         </div>
       </section>
 
@@ -296,24 +350,32 @@
             <div class="form-body">
               <div class="ava-row">
                 <div class="ava-preview" id="avaPreview">A</div>
-                <div><label class="btn-outline-sm upload-lbl" for="avaInput"><i class="fa-solid fa-camera"></i> Change
-                    Photo</label><input type="file" id="avaInput" accept="image/*" style="display:none"
-                    onchange="previewAva(this)">
+                <div>
+                  <label class="btn-outline-sm upload-lbl" for="avaInput"><i class="fa-solid fa-camera"></i> Change
+                    Photo</label><input type="file" id="avaInput" accept="image/*" style="display: none"
+                    onchange="previewAva(this)" />
                   <p class="hint">JPG/PNG/WebP · max 2 MB</p>
                 </div>
               </div>
               <div class="field-row">
-                <div class="field-group"><label>Display Name</label><input type="text" id="profileName"
-                    class="field-input" placeholder="Your name"></div>
-                <div class="field-group"><label>Email</label><input type="email" id="profileEmail" class="field-input"
-                    disabled></div>
+                <div class="field-group">
+                  <label>Display Name</label><input type="text" id="profileName" class="field-input"
+                    placeholder="Your name" />
+                </div>
+                <div class="field-group">
+                  <label>Email</label><input type="email" id="profileEmail" class="field-input" disabled />
+                </div>
               </div>
-              <div class="field-group"><label>Studio Name</label><input type="text" id="profileStudio"
-                  class="field-input" placeholder="Joyalty Photography"></div>
-              <div class="field-group"><label>Phone</label><input type="tel" id="profilePhone" class="field-input"
-                  placeholder="+254…"></div>
-              <button class="btn-accent-sm" onclick="saveProfile()"><i class="fa-solid fa-floppy-disk"></i> Save
-                Profile</button>
+              <div class="field-group">
+                <label>Studio Name</label><input type="text" id="profileStudio" class="field-input"
+                  placeholder="Joyalty Photography" />
+              </div>
+              <div class="field-group">
+                <label>Phone</label><input type="tel" id="profilePhone" class="field-input" placeholder="+254…" />
+              </div>
+              <button class="btn-accent-sm" onclick="saveProfile()">
+                <i class="fa-solid fa-floppy-disk"></i> Save Profile
+              </button>
             </div>
           </div>
           <div class="glass-card form-card">
@@ -322,12 +384,17 @@
             </div>
             <div class="form-body">
               <div id="pwAlert" class="alert"></div>
-              <div class="field-group"><label>New Password</label><input type="password" id="newPw" class="field-input"
-                  placeholder="Min. 8 characters"></div>
-              <div class="field-group"><label>Confirm Password</label><input type="password" id="confirmPw"
-                  class="field-input" placeholder="Repeat password"></div>
-              <button class="btn-outline-sm" onclick="changePassword()"><i class="fa-solid fa-lock"></i> Update
-                Password</button>
+              <div class="field-group">
+                <label>New Password</label><input type="password" id="newPw" class="field-input"
+                  placeholder="Min. 8 characters" />
+              </div>
+              <div class="field-group">
+                <label>Confirm Password</label><input type="password" id="confirmPw" class="field-input"
+                  placeholder="Repeat password" />
+              </div>
+              <button class="btn-outline-sm" onclick="changePassword()">
+                <i class="fa-solid fa-lock"></i> Update Password
+              </button>
             </div>
           </div>
           <div class="glass-card form-card">
@@ -339,22 +406,25 @@
                 <div>
                   <div class="tgl-label">Push Notifications</div>
                   <div class="tgl-sub">New bookings &amp; messages</div>
-                </div><label class="tgl-switch"><input type="checkbox" id="pushToggle"
-                    onchange="togglePush(this.checked)"><span class="tgl-track"></span></label>
+                </div>
+                <label class="tgl-switch"><input type="checkbox" id="pushToggle"
+                    onchange="togglePush(this.checked)" /><span class="tgl-track"></span></label>
               </div>
               <div class="toggle-row">
                 <div>
                   <div class="tgl-label">Chat Alerts</div>
                   <div class="tgl-sub">New client messages</div>
-                </div><label class="tgl-switch"><input type="checkbox" id="chatNotifToggle"
-                    onchange="savePref('chatNotif',this.checked)" checked><span class="tgl-track"></span></label>
+                </div>
+                <label class="tgl-switch"><input type="checkbox" id="chatNotifToggle"
+                    onchange="savePref('chatNotif', this.checked)" checked /><span class="tgl-track"></span></label>
               </div>
               <div class="toggle-row">
                 <div>
                   <div class="tgl-label">Sound Alerts</div>
                   <div class="tgl-sub">Tone on new message</div>
-                </div><label class="tgl-switch"><input type="checkbox" id="soundToggle"
-                    onchange="savePref('soundNotif',this.checked)"><span class="tgl-track"></span></label>
+                </div>
+                <label class="tgl-switch"><input type="checkbox" id="soundToggle"
+                    onchange="savePref('soundNotif', this.checked)" /><span class="tgl-track"></span></label>
               </div>
               <p class="hint" id="notifStatus"></p>
             </div>
@@ -364,44 +434,75 @@
               <h6>App Info</h6>
             </div>
             <div class="form-body">
-              <div class="info-row"><span>Version</span><strong>1.0.0</strong></div>
-              <div class="info-row"><span>Database</span><strong>Supabase</strong></div>
-              <div class="info-row"><span>Auth</span><strong>Firebase</strong></div>
-              <div class="info-row"><span>Hosting</span><strong>Cloudflare Pages</strong></div>
-              <hr class="divider">
-              <button class="btn-danger-sm" onclick="doLogout()"><i class="fa-solid fa-arrow-right-from-bracket"></i>
-                Sign Out</button>
+              <div class="info-row">
+                <span>Version</span><strong>1.0.0</strong>
+              </div>
+              <div class="info-row">
+                <span>Database</span><strong>Supabase</strong>
+              </div>
+              <div class="info-row">
+                <span>Auth</span><strong>Firebase</strong>
+              </div>
+              <div class="info-row">
+                <span>Hosting</span><strong>Cloudflare Pages</strong>
+              </div>
+              <hr class="divider" />
+              <button class="btn-danger-sm" onclick="doLogout()">
+                <i class="fa-solid fa-arrow-right-from-bracket"></i> Sign Out
+              </button>
             </div>
           </div>
         </div>
       </section>
-
     </main>
   </div>
 
   <!-- Bottom Nav -->
   <nav class="bottom-nav" id="bottomNav">
-    <button class="bn-item active" data-tab="overview"><i class="fa-solid fa-chart-pie"></i><span>Home</span></button>
-    <button class="bn-item" data-tab="bookings"><i class="fa-solid fa-calendar-check"></i><span>Bookings</span><span
-        class="bn-badge" id="bnPending" style="display:none">0</span></button>
-    <button class="bn-item" data-tab="clients"><i class="fa-solid fa-users"></i><span>Clients</span></button>
-    <button class="bn-item" data-tab="chat"><i class="fa-solid fa-comments"></i><span>Chat</span><span class="bn-badge"
-        id="bnChat" style="display:none">!</span></button>
-    <button class="bn-item" onclick="openMore()"><i class="fa-solid fa-ellipsis"></i><span>More</span></button>
+    <button class="bn-item active" data-tab="overview">
+      <i class="fa-solid fa-chart-pie"></i><span>Home</span>
+    </button>
+    <button class="bn-item" data-tab="bookings">
+      <i class="fa-solid fa-calendar-check"></i><span>Bookings</span><span class="bn-badge" id="bnPending"
+        style="display: none">0</span>
+    </button>
+    <button class="bn-item" data-tab="clients">
+      <i class="fa-solid fa-users"></i><span>Clients</span>
+    </button>
+    <button class="bn-item" data-tab="chat">
+      <i class="fa-solid fa-comments"></i><span>Chat</span><span class="bn-badge" id="bnChat"
+        style="display: none">!</span>
+    </button>
+    <button class="bn-item" onclick="openMore()">
+      <i class="fa-solid fa-ellipsis"></i><span>More</span>
+    </button>
   </nav>
 
   <!-- More Sheet -->
   <div class="more-sheet" id="moreSheet">
     <div class="more-drag"></div>
-    <button class="mm-item" onclick="switchTab('email');    closeMore()"><i class="fa-solid fa-envelope"></i>
-      Email</button>
-    <button class="mm-item" onclick="switchTab('analytics');closeMore()"><i class="fa-solid fa-chart-line"></i>
-      Analytics</button>
-    <button class="mm-item" onclick="switchTab('profile');  closeMore()"><i class="fa-solid fa-user-gear"></i>
-      Profile</button>
+    <button class="mm-item" onclick="
+          switchTab('email');
+          closeMore();
+        ">
+      <i class="fa-solid fa-envelope"></i> Email
+    </button>
+    <button class="mm-item" onclick="
+          switchTab('analytics');
+          closeMore();
+        ">
+      <i class="fa-solid fa-chart-line"></i> Analytics
+    </button>
+    <button class="mm-item" onclick="
+          switchTab('profile');
+          closeMore();
+        ">
+      <i class="fa-solid fa-user-gear"></i> Profile
+    </button>
     <div class="mm-divider"></div>
-    <button class="mm-item danger" onclick="doLogout()"><i class="fa-solid fa-arrow-right-from-bracket"></i> Sign
-      Out</button>
+    <button class="mm-item danger" onclick="doLogout()">
+      <i class="fa-solid fa-arrow-right-from-bracket"></i> Sign Out
+    </button>
   </div>
   <div class="sheet-overlay" id="sheetOverlay" onclick="closeMore()"></div>
 
@@ -409,20 +510,27 @@
   <div class="modal-wrap" id="bookingModal">
     <div class="glass-card modal-card">
       <div class="modal-hd">
-        <h5 id="bmTitle">New Booking</h5><button class="modal-close" onclick="closeModal('bookingModal')"><i
-            class="fa-solid fa-xmark"></i></button>
+        <h5 id="bmTitle">New Booking</h5>
+        <button class="modal-close" onclick="closeModal('bookingModal')">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
       </div>
       <div id="bmAlert" class="alert"></div>
       <div class="modal-body">
         <div class="field-row">
-          <div class="field-group"><label>Client Name</label><input id="bm-name" class="field-input"
-              placeholder="Full name"></div>
-          <div class="field-group"><label>Email</label><input id="bm-email" type="email" class="field-input"></div>
+          <div class="field-group">
+            <label>Client Name</label><input id="bm-name" class="field-input" placeholder="Full name" />
+          </div>
+          <div class="field-group">
+            <label>Email</label><input id="bm-email" type="email" class="field-input" />
+          </div>
         </div>
         <div class="field-row">
-          <div class="field-group"><label>Phone</label><input id="bm-phone" class="field-input" placeholder="+254…">
+          <div class="field-group">
+            <label>Phone</label><input id="bm-phone" class="field-input" placeholder="+254…" />
           </div>
-          <div class="field-group"><label>Service</label><select id="bm-service" class="field-input">
+          <div class="field-group">
+            <label>Service</label><select id="bm-service" class="field-input">
               <option value="">Choose…</option>
               <option>Wedding Photography</option>
               <option>Portrait Session</option>
@@ -430,54 +538,77 @@
               <option>Event Coverage</option>
               <option>Engagement Shoot</option>
               <option>Family Photography</option>
-            </select></div>
+            </select>
+          </div>
         </div>
         <div class="field-row">
-          <div class="field-group"><label>Package</label><select id="bm-package" class="field-input">
+          <div class="field-group">
+            <label>Package</label><select id="bm-package" class="field-input">
               <option>Standard</option>
               <option>Premium</option>
               <option>Luxury</option>
-            </select></div>
-          <div class="field-group"><label>Extra</label><select id="bm-extra" class="field-input">
+            </select>
+          </div>
+          <div class="field-group">
+            <label>Extra</label><select id="bm-extra" class="field-input">
               <option>None</option>
               <option>Drone Coverage</option>
               <option>Photo Album</option>
               <option>Highlight Video</option>
-            </select></div>
+            </select>
+          </div>
         </div>
         <div class="field-row">
-          <div class="field-group"><label>Event Date</label><input id="bm-date" type="date" class="field-input"></div>
-          <div class="field-group"><label>Location</label><input id="bm-location" class="field-input"
-              placeholder="Venue…"></div>
+          <div class="field-group">
+            <label>Event Date</label><input id="bm-date" type="date" class="field-input" />
+          </div>
+          <div class="field-group">
+            <label>Location</label><input id="bm-location" class="field-input" placeholder="Venue…" />
+          </div>
         </div>
-        <div class="field-group"><label>Notes</label><textarea id="bm-notes" class="field-input" rows="3"></textarea>
+        <div class="field-group">
+          <label>Notes</label><textarea id="bm-notes" class="field-input" rows="3"></textarea>
         </div>
       </div>
-      <div class="modal-ft"><button class="btn-accent-sm" onclick="submitBooking()">Save Booking</button><button
-          class="btn-outline-sm" onclick="closeModal('bookingModal')">Cancel</button></div>
+      <div class="modal-ft">
+        <button class="btn-accent-sm" onclick="submitBooking()">
+          Save Booking</button><button class="btn-outline-sm" onclick="closeModal('bookingModal')">
+          Cancel
+        </button>
+      </div>
     </div>
   </div>
 
   <!-- Delete Modal -->
   <div class="modal-wrap" id="deleteModal">
-    <div class="glass-card modal-card" style="max-width:400px">
+    <div class="glass-card modal-card" style="max-width: 400px">
       <div class="modal-hd">
-        <h5>Delete Booking</h5><button class="modal-close" onclick="closeModal('deleteModal')"><i
-            class="fa-solid fa-xmark"></i></button>
+        <h5>Delete Booking</h5>
+        <button class="modal-close" onclick="closeModal('deleteModal')">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
       </div>
       <div class="modal-body">
-        <p style="color:var(--muted);font-size:.9rem;line-height:1.6">This cannot be undone. The booking, payment and
-          receipt will be permanently removed.</p>
+        <p style="color: var(--muted); font-size: 0.9rem; line-height: 1.6">
+          This cannot be undone. The booking, payment and receipt will be
+          permanently removed.
+        </p>
       </div>
-      <input type="hidden" id="deleteId">
-      <div class="modal-ft"><button class="btn-danger-sm" id="confirmDeleteBtn" onclick="confirmDelete()">Yes,
-          Delete</button><button class="btn-outline-sm" onclick="closeModal('deleteModal')">Cancel</button></div>
+      <input type="hidden" id="deleteId" />
+      <div class="modal-ft">
+        <button class="btn-danger-sm" id="confirmDeleteBtn" onclick="confirmDelete()">
+          Yes, Delete</button><button class="btn-outline-sm" onclick="closeModal('deleteModal')">
+          Cancel
+        </button>
+      </div>
     </div>
   </div>
 
   <script>
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/admin/sw.js", { scope: "/admin/" }).catch(() => { });
+      navigator.serviceWorker
+        .register("/admin/sw.js", { scope: "/admin/" })
+        .catch(() => { });
     }
   </script>
   <script src="assets/auth.js"></script>

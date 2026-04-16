@@ -1,6 +1,5 @@
 /* ============================================================
-  Real time Firebase login 
-  
+  Real time Firebase login
 ============================================================ */
 
 // ── Firebase config — replace with your real values ──────────
