@@ -1,0 +1,289 @@
+/* ============================================================
+   JOYALTY ADMIN — admin-chat.css
+   Additions for: ticks, reply bar, file bubbles, audio player,
+   typing indicator, attach/record buttons, read receipts.
+   Add <link> to admin/index.html AFTER admin.css
+============================================================ */
+
+/* ── Read receipts / ticks ─────────────────────────────────── */
+.ticks {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.7rem;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+.ticks.grey {
+  color: rgba(240, 236, 228, 0.35);
+}
+.ticks.blue {
+  color: #53bdeb;
+}
+.msg-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  margin-top: 2px;
+}
+.msg.in .msg-meta {
+  justify-content: flex-start;
+}
+.msg-time {
+  font-size: 0.64rem;
+  color: var(--muted2);
+}
+
+/* ── Reply quote strip ─────────────────────────────────────── */
+.msg-quote {
+  background: rgba(212, 168, 75, 0.1);
+  border-left: 3px solid var(--gold);
+  border-radius: 4px 4px 0 0;
+  padding: 5px 9px;
+  font-size: 0.75rem;
+  color: var(--gold);
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
+.msg-quote i {
+  margin-right: 5px;
+  opacity: 0.7;
+  font-size: 0.65rem;
+}
+
+/* ── Reply bar in chat input ───────────────────────────────── */
+.reply-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(212, 168, 75, 0.08);
+  border-top: 1px solid rgba(212, 168, 75, 0.15);
+  border-left: 3px solid var(--gold);
+  padding: 7px 12px;
+  font-size: 0.78rem;
+  color: var(--gold);
+  animation: slideDown 0.15s ease;
+}
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.reply-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.reply-bar-inner span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.reply-bar button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+  padding: 2px 5px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+.reply-bar button:hover {
+  color: var(--danger);
+}
+
+/* ── Image bubble ──────────────────────────────────────────── */
+.msg-img {
+  max-width: 220px;
+  max-height: 200px;
+  width: auto;
+  height: auto;
+  border-radius: 10px;
+  cursor: zoom-in;
+  display: block;
+  object-fit: cover;
+  transition: opacity 0.15s;
+}
+.msg-img:hover {
+  opacity: 0.88;
+}
+
+/* ── File bubble ───────────────────────────────────────────── */
+.msg-file {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 13px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  text-decoration: none;
+  color: var(--text);
+  font-size: 0.83rem;
+  cursor: pointer;
+  transition: background 0.15s;
+  max-width: 240px;
+}
+.msg-file:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.msg-file.pdf-file {
+  border-color: rgba(239, 68, 68, 0.2);
+}
+.msg-file span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+/* ── Audio player ──────────────────────────────────────────── */
+.msg-audio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  padding: 8px 12px;
+  min-width: 180px;
+  max-width: 240px;
+}
+.audio-play-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #b8860b, var(--gold));
+  color: #0a0810;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+.audio-play-btn:hover {
+  opacity: 0.85;
+}
+.audio-bar {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.audio-progress {
+  height: 100%;
+  background: var(--gold);
+  width: 0%;
+  border-radius: 2px;
+  transition: width 0.1s linear;
+}
+.audio-dur {
+  font-size: 0.68rem;
+  color: var(--muted);
+  flex-shrink: 0;
+  min-width: 28px;
+}
+
+/* ── Chat bar attach / record buttons ──────────────────────── */
+.chat-bar-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 6px 8px;
+  border-radius: var(--r);
+  transition:
+    color 0.15s,
+    background 0.15s;
+  flex-shrink: 0;
+}
+.chat-bar-btn:hover {
+  color: var(--text);
+  background: var(--surface3);
+}
+.chat-bar-btn.recording {
+  color: var(--danger);
+  animation: pulse 0.8s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* ── Typing indicator (admin seeing user type) ─────────────── */
+/* Already in admin.css — this is for the "Admin typing" hint shown to user */
+.typing-hint {
+  font-size: 0.71rem;
+  color: var(--muted);
+  padding: 4px 14px;
+  font-style: italic;
+  animation: fadeIn 0.2s ease;
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ── Online dot in chat header ─────────────────────────────── */
+.online-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  margin-right: 5px;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25);
+  animation: onlinePulse 2.5s ease-in-out infinite;
+}
+@keyframes onlinePulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.08);
+  }
+}
+
+/* ── Notification click highlight on session ──────────────── */
+.contact-item.highlight-notif {
+  animation: notifFlash 0.4s ease 3;
+}
+@keyframes notifFlash {
+  0%,
+  100% {
+    background: var(--gold-dim);
+  }
+  50% {
+    background: rgba(212, 168, 75, 0.3);
+  }
+}

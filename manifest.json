@@ -2,15 +2,15 @@
   "name": "Joyalty Admin",
   "short_name": "JoyAdmin",
   "description": "Joyalty Photography Admin Dashboard",
-  "start_url": "/admin/",
   "id": "/admin/",
+  "start_url": "/admin/",
+  "scope": "/admin/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait-primary",
   "background_color": "#0a0810",
   "theme_color": "#0a0810",
   "categories": ["business", "productivity"],
-  "scope": "/admin/",
   "icons": [
     {
       "src": "/admin/icons/icon-192.png",
@@ -35,22 +35,6 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
-    }
-  ],
-  "screenshots": [
-    {
-      "src": "/admin/icons/screenshot-desktop.png",
-      "sizes": "1280x720",
-      "type": "image/png",
-      "form_factor": "wide",
-      "label": "Joyalty Admin Dashboard"
-    },
-    {
-      "src": "/admin/icons/screenshot-mobile.png",
-      "sizes": "390x844",
-      "type": "image/png",
-      "form_factor": "narrow",
-      "label": "Joyalty Admin on Mobile"
     }
   ],
   "prefer_related_applications": false
