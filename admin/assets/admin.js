@@ -652,11 +652,15 @@ async function sendAdminEmail() {
 // ═══════════════════════════════════════════════════════════════
 // CHAT
 // ═══════════════════════════════════════════════════════════════
+import { createRoot } from "react-dom/client";
+import AdminChatPage from "./AdminChatPage.jsx";
+
 function initChat() {
-  g("modeBtnBot")?.classList.toggle("active", chatMode === "bot");
-  g("modeBtnLive")?.classList.toggle("active", chatMode === "live");
-  if (chatMode === "bot") renderBotContact();
-  else loadSessions();
+  const el = document.getElementById("admin-chat-mount");
+  if (el && !el._root) {
+    el._root = createRoot(el);
+    el._root.render(<AdminChatPage />);
+  }
 }
 function setChatMode(mode) {
   chatMode = mode;
