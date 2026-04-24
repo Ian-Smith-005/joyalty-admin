@@ -19,66 +19,31 @@ const ALLOWED_ADMINS = [
   // "secondadmin@example.com",
 ];
 
-// ── Firebase SDK (loaded via CDN in admin/index.html) ─────────
-// Make sure these script tags are in admin/index.html <head>:
-//   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-//   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-//   <script src="auth.js"></script>
-
-let firebaseApp = null;
-let firebaseAuth = null;
-
-function initFirebase() {
-  if (firebaseApp) return;
-  try {
-    firebaseApp = firebase.initializeApp(firebaseConfig);
-    firebaseAuth = firebase.auth();
-    console.log("[auth] Firebase initialised");
-  } catch (err) {
-    console.error("[auth] Firebase init failed:", err.message);
-  }
+/// Initialise only once
+if (!firebase.apps || !firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
 }
 
-// ── Sign in ───────────────────────────────────────────────────
-async function firebaseSignIn(email, password) {
-  initFirebase();
-  if (!firebaseAuth) throw new Error("Firebase not initialised");
+const auth = firebase.auth();
 
-  const credential = await firebaseAuth.signInWithEmailAndPassword(
-    email,
-    password,
-  );
-  const user = credential.user;
+// Persist session across page loads
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
 
-  if (!ALLOWED_ADMINS.includes(user.email)) {
-    await firebaseAuth.signOut();
-    throw new Error("Access denied — this email is not an admin.");
-  }
+window.joyaltyAuth = {
+  firebaseSignIn: (email, password) =>
+    auth.signInWithEmailAndPassword(email, password).then((cred) => cred.user),
 
-  return user;
-}
+  firebaseSignOut: () => auth.signOut(),
 
-// ── Sign out ──────────────────────────────────────────────────
-async function firebaseSignOut() {
-  if (firebaseAuth) await firebaseAuth.signOut();
-}
+  checkAuthState: (onLoggedIn, onLoggedOut) => {
+    auth.onAuthStateChanged((user) => {
+      if (user) {
+        onLoggedIn(user);
+      } else {
+        onLoggedOut();
+      }
+    });
+  },
 
-// ── Check existing session on page load ──────────────────────
-function checkAuthState(onLoggedIn, onLoggedOut) {
-  initFirebase();
-  if (!firebaseAuth) {
-    onLoggedOut();
-    return;
-  }
-
-  firebaseAuth.onAuthStateChanged((user) => {
-    if (user && ALLOWED_ADMINS.includes(user.email)) {
-      onLoggedIn(user);
-    } else {
-      onLoggedOut();
-    }
-  });
-}
-
-// ── Export for use in admin/index.html ────────────────────────
-window.joyaltyAuth = { firebaseSignIn, firebaseSignOut, checkAuthState };
+  getCurrentUser: () => auth.currentUser,
+};

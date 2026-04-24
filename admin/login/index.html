@@ -1,374 +1,427 @@
 <!doctype html>
 <html lang="en">
-
-<head>
+  <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Joyalty Admin — Sign In</title>
-    <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700&family=Quintessential&display=swap"
-        rel="stylesheet" />
-    <script src="https://kit.fontawesome.com/f3068f95b3.js" crossorigin="anonymous"></script>
-    <link rel="shortcut icon" href="https://joyaltyphotography.netlify.app/images/templatemo-logo.png"
-        type="image/x-icon">
-    <!-- Firebase -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700&family=Quintessential&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="shortcut icon"
+      href="https://joyaltyphotography.netlify.app/images/templatemo-logo.png"
+      type="image/x-icon"
+    />
+    <!-- Firebase (must load before auth.js) -->
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+    <!-- auth.js is at admin/assets/auth.js — one level up from login/ -->
     <script src="../assets/auth.js"></script>
     <style>
-        *,
-        *::before,
-        *::after {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --bg: #0a0810;
+        --surface: rgba(22, 18, 36, 0.92);
+        --border: rgba(212, 168, 75, 0.13);
+        --gold: #d4a84b;
+        --gold-d: rgba(212, 168, 75, 0.14);
+        --text: #f0ece4;
+        --muted: rgba(240, 236, 228, 0.45);
+        --danger: #ef4444;
+        --r: 10px;
+      }
+      html,
+      body {
+        width: 100%;
+        min-height: 100%;
+        font-family: "Quicksand", sans-serif;
+        color: var(--text);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background:
+          radial-gradient(
+            ellipse at 25% 40%,
+            rgba(212, 168, 75, 0.1) 0%,
+            transparent 55%
+          ),
+          radial-gradient(
+            ellipse at 75% 65%,
+            rgba(124, 110, 240, 0.08) 0%,
+            transparent 50%
+          ),
+          var(--bg);
+      }
+      .orb {
+        position: fixed;
+        border-radius: 50%;
+        filter: blur(80px);
+        pointer-events: none;
+        z-index: 0;
+      }
+      .orb1 {
+        width: 400px;
+        height: 400px;
+        top: -120px;
+        left: -120px;
+        background: rgba(124, 110, 240, 0.09);
+        animation: orb1 14s ease-in-out infinite alternate;
+      }
+      .orb2 {
+        width: 320px;
+        height: 320px;
+        bottom: -80px;
+        right: -80px;
+        background: rgba(212, 168, 75, 0.07);
+        animation: orb2 18s ease-in-out infinite alternate;
+      }
+      @keyframes orb1 {
+        to {
+          transform: translate(70px, 50px);
         }
-
-        :root {
-            --bg: #0a0810;
-            --surface: rgba(22, 18, 36, .88);
-            --border: rgba(212, 168, 75, .13);
-            --gold: #d4a84b;
-            --gold-dim: rgba(212, 168, 75, .14);
-            --text: #f0ece4;
-            --muted: rgba(240, 236, 228, .45);
-            --danger: #ef4444;
-            --r: 10px;
+      }
+      @keyframes orb2 {
+        to {
+          transform: translate(-50px, -70px);
         }
+      }
 
-        html,
-        body {
-            width: 100%;
-            height: 100%;
-            font-family: 'Quicksand', sans-serif;
-            background:
-                radial-gradient(ellipse at 25% 40%, rgba(212, 168, 75, .10) 0%, transparent 55%),
-                radial-gradient(ellipse at 75% 65%, rgba(124, 110, 240, .08) 0%, transparent 50%),
-                var(--bg);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--text);
+      .card {
+        position: relative;
+        z-index: 1;
+        background: var(--surface);
+        backdrop-filter: blur(24px);
+        -webkit-backdrop-filter: blur(24px);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 46px 40px;
+        width: 100%;
+        max-width: 420px;
+        box-shadow:
+          0 32px 80px rgba(0, 0, 0, 0.6),
+          inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        animation: cardIn 0.4s cubic-bezier(0.34, 1.2, 0.64, 1);
+      }
+      @keyframes cardIn {
+        from {
+          opacity: 0;
+          transform: translateY(20px) scale(0.97);
         }
-
-        /* Animated background orbs */
-        .orb {
-            position: fixed;
-            border-radius: 50%;
-            filter: blur(80px);
-            pointer-events: none;
-            z-index: 0;
+        to {
+          opacity: 1;
+          transform: none;
         }
+      }
 
-        .orb1 {
-            width: 400px;
-            height: 400px;
-            top: -100px;
-            left: -100px;
-            background: rgba(124, 110, 240, .08);
-            animation: drift1 12s ease-in-out infinite alternate;
+      .logo {
+        text-align: center;
+        margin-bottom: 30px;
+      }
+      .logo img {
+        height: 50px;
+        margin-bottom: 12px;
+        filter: drop-shadow(0 4px 12px rgba(212, 168, 75, 0.3));
+        display: block;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      .logo h1 {
+        font-family: "Quintessential", cursive;
+        font-size: 1.55rem;
+        color: var(--text);
+      }
+      .logo h1 span {
+        color: var(--gold);
+      }
+      .logo p {
+        color: var(--muted);
+        font-size: 0.82rem;
+        margin-top: 4px;
+        letter-spacing: 0.04em;
+      }
+
+      .error-box {
+        display: none;
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid rgba(239, 68, 68, 0.25);
+        color: #fca5a5;
+        border-radius: var(--r);
+        padding: 10px 14px;
+        font-size: 0.83rem;
+        margin-bottom: 14px;
+        animation: shake 0.3s ease;
+      }
+      @keyframes shake {
+        0%,
+        100% {
+          transform: none;
         }
-
-        .orb2 {
-            width: 300px;
-            height: 300px;
-            bottom: -80px;
-            right: -80px;
-            background: rgba(212, 168, 75, .07);
-            animation: drift2 15s ease-in-out infinite alternate;
+        25% {
+          transform: translateX(-6px);
         }
-
-        @keyframes drift1 {
-            to {
-                transform: translate(60px, 40px);
-            }
+        75% {
+          transform: translateX(6px);
         }
+      }
 
-        @keyframes drift2 {
-            to {
-                transform: translate(-40px, -50px);
-            }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 15px;
+      }
+      .field label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .field input {
+        background: rgba(38, 30, 58, 0.9);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: var(--r);
+        padding: 11px 14px;
+        font-family: "Quicksand", sans-serif;
+        font-size: 0.9rem;
+        outline: none;
+        width: 100%;
+        transition:
+          border-color 0.2s,
+          box-shadow 0.2s;
+      }
+      .field input:focus {
+        border-color: var(--gold);
+        box-shadow: 0 0 0 3px var(--gold-d);
+      }
+      .field input::placeholder {
+        color: var(--muted);
+      }
+
+      .pw-wrap {
+        position: relative;
+      }
+      .pw-eye {
+        position: absolute;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.85rem;
+        transition: color 0.2s;
+        padding: 4px;
+      }
+      .pw-eye:hover {
+        color: var(--gold);
+      }
+
+      .btn-login {
+        width: 100%;
+        padding: 13px;
+        margin-top: 4px;
+        background: linear-gradient(135deg, #b8860b, var(--gold));
+        color: #0a0810;
+        border: none;
+        border-radius: var(--r);
+        font-family: "Quicksand", sans-serif;
+        font-weight: 700;
+        font-size: 0.95rem;
+        cursor: pointer;
+        letter-spacing: 0.02em;
+        box-shadow:
+          0 4px 20px var(--gold-d),
+          inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        transition:
+          opacity 0.2s,
+          transform 0.15s,
+          box-shadow 0.2s;
+      }
+      .btn-login:hover {
+        opacity: 0.9;
+        transform: translateY(-1px);
+        box-shadow: 0 8px 28px var(--gold-d);
+      }
+      .btn-login:active {
+        transform: scale(0.97);
+      }
+      .btn-login:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .spinner {
+        display: inline-block;
+        width: 15px;
+        height: 15px;
+        border: 2px solid rgba(0, 0, 0, 0.2);
+        border-top-color: #0a0810;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+        vertical-align: middle;
+        margin-right: 4px;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
         }
+      }
 
-        .login-wrap {
-            position: relative;
-            z-index: 1;
-            background: var(--surface);
-            backdrop-filter: blur(24px);
-            -webkit-backdrop-filter: blur(24px);
-            border: 1px solid var(--border);
-            border-radius: 18px;
-            padding: 46px 40px;
-            width: 100%;
-            max-width: 420px;
-            box-shadow: 0 32px 80px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .06);
-            animation: cardIn .4s cubic-bezier(.34, 1.2, .64, 1);
+      .back-link {
+        display: block;
+        text-align: center;
+        margin-top: 22px;
+        font-size: 0.8rem;
+        color: var(--muted);
+        text-decoration: none;
+        transition: color 0.2s;
+      }
+      .back-link:hover {
+        color: var(--gold);
+      }
+
+      @media (max-width: 480px) {
+        .card {
+          padding: 28px 20px;
+          margin: 16px;
         }
-
-        @keyframes cardIn {
-            from {
-                opacity: 0;
-                transform: translateY(20px) scale(.97);
-            }
-
-            to {
-                opacity: 1;
-                transform: none;
-            }
-        }
-
-        .login-logo {
-            text-align: center;
-            margin-bottom: 32px;
-        }
-
-        .login-logo img {
-            height: 50px;
-            margin-bottom: 12px;
-            filter: drop-shadow(0 4px 12px rgba(212, 168, 75, .3));
-        }
-
-        .login-logo h1 {
-            font-family: 'Quintessential', cursive;
-            font-size: 1.6rem;
-            color: var(--text);
-        }
-
-        .login-logo h1 span {
-            color: var(--gold);
-        }
-
-        .login-logo p {
-            color: var(--muted);
-            font-size: .83rem;
-            margin-top: 4px;
-            letter-spacing: .04em;
-        }
-
-        .field-group {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            margin-bottom: 16px;
-        }
-
-        .field-group label {
-            font-size: .72rem;
-            font-weight: 700;
-            letter-spacing: .08em;
-            text-transform: uppercase;
-            color: var(--muted);
-        }
-
-        .field-input {
-            background: rgba(38, 30, 58, .9);
-            border: 1px solid var(--border);
-            color: var(--text);
-            border-radius: var(--r);
-            padding: 11px 14px;
-            font-family: 'Quicksand', sans-serif;
-            font-size: .9rem;
-            outline: none;
-            width: 100%;
-            transition: border-color .2s, box-shadow .2s;
-        }
-
-        .field-input:focus {
-            border-color: var(--gold);
-            box-shadow: 0 0 0 3px var(--gold-dim);
-        }
-
-        .field-input::placeholder {
-            color: var(--muted);
-        }
-
-        .pw-wrap {
-            position: relative;
-        }
-
-        .pw-eye {
-            position: absolute;
-            right: 12px;
-            top: 50%;
-            transform: translateY(-50%);
-            background: none;
-            border: none;
-            color: var(--muted);
-            cursor: pointer;
-            font-size: .85rem;
-            transition: color .2s;
-        }
-
-        .pw-eye:hover {
-            color: var(--gold);
-        }
-
-        .btn-login {
-            width: 100%;
-            padding: 13px;
-            margin-top: 8px;
-            background: linear-gradient(135deg, #b8860b, var(--gold));
-            color: #0a0810;
-            border: none;
-            border-radius: var(--r);
-            font-family: 'Quicksand', sans-serif;
-            font-weight: 700;
-            font-size: .95rem;
-            cursor: pointer;
-            letter-spacing: .02em;
-            box-shadow: 0 4px 20px var(--gold-dim), 0 1px 0 rgba(255, 255, 255, .1) inset;
-            transition: opacity .2s, transform .15s, box-shadow .2s;
-        }
-
-        .btn-login:hover {
-            opacity: .9;
-            transform: translateY(-1px);
-            box-shadow: 0 8px 28px var(--gold-dim);
-        }
-
-        .btn-login:active {
-            transform: scale(.97);
-        }
-
-        .error-box {
-            display: none;
-            background: rgba(239, 68, 68, .1);
-            border: 1px solid rgba(239, 68, 68, .25);
-            color: #fca5a5;
-            border-radius: var(--r);
-            padding: 10px 14px;
-            font-size: .83rem;
-            margin-bottom: 14px;
-            animation: shake .3s ease;
-        }
-
-        @keyframes shake {
-
-            0%,
-            100% {
-                transform: none
-            }
-
-            25% {
-                transform: translateX(-6px)
-            }
-
-            75% {
-                transform: translateX(6px)
-            }
-        }
-
-        .spinner {
-            display: inline-block;
-            width: 15px;
-            height: 15px;
-            border: 2px solid rgba(0, 0, 0, .2);
-            border-top-color: #0a0810;
-            border-radius: 50%;
-            animation: spin .6s linear infinite;
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
-        .back-link {
-            display: block;
-            text-align: center;
-            margin-top: 20px;
-            font-size: .8rem;
-            color: var(--muted);
-            text-decoration: none;
-            transition: color .2s;
-        }
-
-        .back-link:hover {
-            color: var(--gold);
-        }
+      }
     </style>
-</head>
-
-<body>
+  </head>
+  <body>
     <div class="orb orb1"></div>
     <div class="orb orb2"></div>
 
-    <div class="login-wrap">
-        <div class="login-logo">
-            <img src="https://joyaltyphotography.netlify.app/images/templatemo-logo.png" alt="Joyalty">
-            <h1>JO<span>Y</span>ALTY</h1>
-            <p>Admin Dashboard</p>
+    <div class="card">
+      <div class="logo">
+        <img
+          src="https://joyaltyphotography.netlify.app/images/templatemo-logo.png"
+          alt="Joyalty"
+        />
+        <h1>JO<span>Y</span>ALTY</h1>
+        <p>Admin Dashboard</p>
+      </div>
+
+      <div id="errorBox" class="error-box"></div>
+
+      <div class="field">
+        <label>Email Address</label>
+        <input
+          type="email"
+          id="loginEmail"
+          placeholder="admin@joyalty.com"
+          autocomplete="email"
+          autofocus
+        />
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <div class="pw-wrap">
+          <input
+            type="password"
+            id="loginPass"
+            placeholder="••••••••"
+            autocomplete="current-password"
+          />
+          <button
+            type="button"
+            class="pw-eye"
+            onclick="togglePw()"
+            tabindex="-1"
+          >
+            <i class="fa-solid fa-eye" id="pwIcon"></i>
+          </button>
         </div>
+      </div>
 
-        <div id="errorBox" class="error-box"></div>
+      <button class="btn-login" id="loginBtn" onclick="doLogin()">
+        <span id="btnText">Sign In</span>
+      </button>
 
-        <div class="field-group">
-            <label>Email Address</label>
-            <input type="email" id="loginEmail" class="field-input" placeholder="admin@joyalty.com"
-                autocomplete="email">
-        </div>
-        <div class="field-group">
-            <label>Password</label>
-            <div class="pw-wrap">
-                <input type="password" id="loginPass" class="field-input" placeholder="••••••••"
-                    autocomplete="current-password">
-                <button type="button" class="pw-eye" onclick="togglePw()" tabindex="-1">
-                    <i class="fa-solid fa-eye" id="pwIcon"></i>
-                </button>
-            </div>
-        </div>
-
-        <button class="btn-login" id="loginBtn" onclick="doLogin()">
-            <span id="btnText">Sign In</span>
-        </button>
-
-        <a href="/" class="back-link"><i class="fa-solid fa-arrow-left" style="font-size:.7rem"></i> Back to main
-            site</a>
+      <a href="/" class="back-link">← Back to main site</a>
     </div>
 
+    <script
+      src="https://kit.fontawesome.com/f3068f95b3.js"
+      crossorigin="anonymous"
+    ></script>
     <script>
-        // If already logged in, go straight to dashboard
-        window.joyaltyAuth.checkAuthState(
-            () => { window.location.replace("/"); },
-            () => { /* not logged in — show form */ }
-        );
+      // If already logged in redirect straight to dashboard
+      window.joyaltyAuth.checkAuthState(
+        () => {
+          window.location.replace("/admin/");
+        },
+        () => {
+          /* show form */
+        },
+      );
 
-        async function doLogin() {
-            const email = document.getElementById("loginEmail").value.trim();
-            const pass = document.getElementById("loginPass").value;
-            const errBox = document.getElementById("errorBox");
-            const btn = document.getElementById("btnText");
-            errBox.style.display = "none";
+      async function doLogin() {
+        const email = document.getElementById("loginEmail").value.trim();
+        const pass = document.getElementById("loginPass").value;
+        const errBox = document.getElementById("errorBox");
+        const btn = document.getElementById("loginBtn");
+        const btnTxt = document.getElementById("btnText");
 
-            if (!email || !pass) {
-                errBox.textContent = "Enter your email and password.";
-                errBox.style.display = "block"; return;
-            }
-            btn.innerHTML = '<span class="spinner"></span>';
-
-            try {
-                await window.joyaltyAuth.firebaseSignIn(email, pass);
-                window.location.replace("/");
-            } catch (e) {
-                btn.textContent = "Sign In";
-                errBox.textContent = (e.code === "auth/wrong-password" || e.code === "auth/user-not-found")
-                    ? "Incorrect email or password."
-                    : (e.message || "Login failed.");
-                errBox.style.display = "block";
-            }
+        errBox.style.display = "none";
+        if (!email || !pass) {
+          showErr("Enter your email and password.");
+          return;
         }
 
-        function togglePw() {
-            const inp = document.getElementById("loginPass");
-            const ico = document.getElementById("pwIcon");
-            inp.type = inp.type === "password" ? "text" : "password";
-            ico.className = inp.type === "text" ? "fa-solid fa-eye-slash" : "fa-solid fa-eye";
-        }
+        btn.disabled = true;
+        btnTxt.innerHTML = '<span class="spinner"></span>Signing in…';
 
-        document.getElementById("loginPass").addEventListener("keypress", e => {
-            if (e.key === "Enter") doLogin();
+        try {
+          await window.joyaltyAuth.firebaseSignIn(email, pass);
+          // Successful — redirect to dashboard
+          window.location.replace("/admin/");
+        } catch (e) {
+          btn.disabled = false;
+          btnTxt.textContent = "Sign In";
+          const msg =
+            e.code === "auth/wrong-password" ||
+            e.code === "auth/user-not-found" ||
+            e.code === "auth/invalid-credential"
+              ? "Incorrect email or password."
+              : e.message || "Login failed. Please try again.";
+          showErr(msg);
+        }
+      }
+
+      function showErr(msg) {
+        const b = document.getElementById("errorBox");
+        b.textContent = msg;
+        b.style.display = "block";
+      }
+
+      function togglePw() {
+        const inp = document.getElementById("loginPass");
+        const ico = document.getElementById("pwIcon");
+        inp.type = inp.type === "password" ? "text" : "password";
+        ico.className =
+          inp.type === "text" ? "fa-solid fa-eye-slash" : "fa-solid fa-eye";
+      }
+
+      document.getElementById("loginPass").addEventListener("keypress", (e) => {
+        if (e.key === "Enter") doLogin();
+      });
+      document
+        .getElementById("loginEmail")
+        .addEventListener("keypress", (e) => {
+          if (e.key === "Enter") document.getElementById("loginPass").focus();
         });
     </script>
-</body>
-
+  </body>
 </html>

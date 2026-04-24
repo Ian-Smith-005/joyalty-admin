@@ -1,0 +1,925 @@
+/* ================================================================
+   WhatsApp-style chat — admin panel additions
+   Append to admin.css OR link as admin-wa.css
+================================================================ */
+
+/* ── Shell layout ─────────────────────────────────────────────── */
+.tab.active#tab-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+}
+.page-content.chat-mode {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.page-content.chat-mode .tab.active {
+  flex: 1;
+  min-height: 0;
+}
+
+.wa-shell {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────── */
+.wa-sidebar {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: rgba(14, 11, 22, 0.95);
+  overflow: hidden;
+}
+.wa-sidebar-hd {
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.wa-sidebar-title {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted2);
+  margin-bottom: 10px;
+}
+.wa-mode-pills {
+  display: flex;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 22px;
+  padding: 3px;
+}
+.wa-pill {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-family: "Quicksand", sans-serif;
+  font-size: 0.73rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.wa-pill.active {
+  background: var(--gold);
+  color: #0a0810;
+}
+.wa-session-list {
+  flex: 1;
+  overflow-y: auto;
+}
+.wa-session-list::-webkit-scrollbar {
+  width: 3px;
+}
+.wa-session-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.wa-session-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background 0.15s;
+  position: relative;
+}
+.wa-session-item:hover {
+  background: rgba(212, 168, 75, 0.07);
+}
+.wa-session-item.active {
+  background: rgba(212, 168, 75, 0.12);
+}
+.wa-sess-ava {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #4c3aad, #7c6ef0);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.88rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+}
+.wa-sess-online {
+  position: absolute;
+  bottom: 1px;
+  right: 1px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #22c55e;
+  border: 2px solid var(--bg);
+  display: none;
+}
+.wa-sess-info {
+  flex: 1;
+  min-width: 0;
+}
+.wa-sess-name {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.wa-sess-prev {
+  font-size: 0.74rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wa-sess-badge {
+  background: var(--gold);
+  color: #0a0810;
+  border-radius: 99px;
+  font-size: 0.63rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  min-width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* ── Main area ────────────────────────────────────────────────── */
+.wa-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wa-main-hd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(14, 11, 22, 0.97);
+  flex-shrink: 0;
+}
+.wa-back {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.88rem;
+  padding: 4px;
+}
+.wa-hd-ava {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #4c3aad, #7c6ef0);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.86rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.wa-hd-info {
+  flex: 1;
+  min-width: 0;
+}
+.wa-hd-name {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.wa-hd-sub {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-top: 1px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.wa-online-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  animation: waPulse 2.5s ease-in-out infinite;
+  flex-shrink: 0;
+}
+@keyframes waPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.08);
+  }
+}
+.wa-hd-actions {
+  display: flex;
+  gap: 4px;
+}
+.wa-icon-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.88rem;
+  padding: 6px;
+  border-radius: 8px;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+.wa-icon-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* ── Typing bar ───────────────────────────────────────────────── */
+.wa-typing-bar {
+  padding: 4px 16px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-style: italic;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(14, 11, 22, 0.97);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+.wa-typing-dots {
+  display: flex;
+  gap: 3px;
+}
+.wa-typing-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--gold);
+  opacity: 0.5;
+  animation: waDot 0.9s infinite;
+}
+.wa-typing-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.wa-typing-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes waDot {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-4px);
+  }
+}
+
+/* ── Messages ─────────────────────────────────────────────────── */
+.wa-msgs {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background:
+    radial-gradient(
+      ellipse at 10% 90%,
+      rgba(124, 110, 240, 0.05) 0%,
+      transparent 50%
+    ),
+    radial-gradient(
+      ellipse at 90% 10%,
+      rgba(212, 168, 75, 0.04) 0%,
+      transparent 50%
+    ),
+    var(--bg);
+}
+.wa-msgs::-webkit-scrollbar {
+  width: 4px;
+}
+.wa-msgs::-webkit-scrollbar-thumb {
+  background: rgba(212, 168, 75, 0.18);
+  border-radius: 4px;
+}
+
+.wa-empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--muted2);
+}
+.wa-empty-state i {
+  font-size: 2.5rem;
+  opacity: 0.25;
+}
+.wa-empty-state p {
+  font-size: 0.83rem;
+}
+
+/* Message row */
+.wa-msg-row {
+  display: flex;
+  flex-direction: column;
+}
+.wa-msg-row.out {
+  align-items: flex-end;
+}
+.wa-msg-row.in {
+  align-items: flex-start;
+}
+
+.wa-msg-sender-name {
+  font-size: 0.68rem;
+  color: var(--gold);
+  font-weight: 700;
+  margin-bottom: 3px;
+  padding-left: 2px;
+}
+
+.wa-bubble-wrap {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: 72%;
+}
+.wa-msg-row.out .wa-bubble-wrap {
+  flex-direction: row-reverse;
+}
+
+.wa-bubble-ava {
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #4c3aad, #7c6ef0);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-bottom: 2px;
+}
+
+.wa-bubble {
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 0.87rem;
+  line-height: 1.58;
+  word-break: break-word;
+  position: relative;
+  transition: box-shadow 0.15s;
+}
+.wa-msg-row.in .wa-bubble {
+  background: rgba(38, 30, 58, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 4px 12px 12px 12px;
+  color: var(--text);
+}
+.wa-msg-row.out .wa-bubble {
+  background: linear-gradient(135deg, #2a1d08, #3d2509);
+  border: 1px solid rgba(212, 168, 75, 0.2);
+  border-radius: 12px 4px 12px 12px;
+  color: #f2e4c4;
+}
+.wa-bubble:hover {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* Quote strip */
+.wa-quote {
+  background: rgba(212, 168, 75, 0.1);
+  border-left: 3px solid var(--gold);
+  border-radius: 4px;
+  padding: 4px 9px;
+  font-size: 0.74rem;
+  color: var(--gold);
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+  cursor: pointer;
+}
+.wa-quote i {
+  margin-right: 4px;
+  font-size: 0.63rem;
+  opacity: 0.7;
+}
+
+/* Meta row */
+.wa-msg-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  margin-top: 4px;
+}
+.wa-msg-row.in .wa-msg-meta {
+  justify-content: flex-start;
+}
+.wa-msg-time {
+  font-size: 0.63rem;
+  color: rgba(240, 236, 228, 0.28);
+}
+.wa-ticks {
+  font-size: 0.7rem;
+  margin-left: 2px;
+}
+.wa-ticks.grey {
+  color: rgba(240, 236, 228, 0.32);
+}
+.wa-ticks.blue {
+  color: #53bdeb;
+}
+
+/* Reactions */
+.wa-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+}
+.wa-reaction-pill {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 2px 7px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  transition: background 0.15s;
+}
+.wa-reaction-pill:hover {
+  background: rgba(212, 168, 75, 0.12);
+  border-color: rgba(212, 168, 75, 0.2);
+}
+.wa-reaction-count {
+  font-size: 0.67rem;
+  color: var(--muted);
+}
+
+/* Reaction action bar (on hover) */
+.wa-react-bar {
+  position: absolute;
+  top: -36px;
+  display: flex;
+  gap: 2px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  padding: 3px 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  z-index: 10;
+  white-space: nowrap;
+}
+.wa-msg-row.out .wa-react-bar {
+  right: 0;
+}
+.wa-msg-row.in .wa-react-bar {
+  left: 0;
+}
+.wa-react-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.05rem;
+  padding: 2px 4px;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+.wa-react-btn:hover {
+  background: rgba(212, 168, 75, 0.1);
+}
+.wa-reply-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding: 2px 6px;
+  border-radius: 8px;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.wa-reply-btn:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+
+/* Date separator */
+.wa-date-sep {
+  text-align: center;
+  font-size: 0.7rem;
+  color: var(--muted2);
+  margin: 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wa-date-sep::before,
+.wa-date-sep::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* File bubbles */
+.wa-img-bubble {
+  max-width: 220px;
+  max-height: 200px;
+  border-radius: 10px;
+  cursor: zoom-in;
+  display: block;
+  object-fit: cover;
+}
+.wa-file-bubble {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  cursor: pointer;
+  max-width: 230px;
+  text-decoration: none;
+  color: var(--text);
+}
+.wa-file-bubble.pdf {
+  border-color: rgba(239, 68, 68, 0.18);
+}
+.wa-file-name {
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+/* Audio player */
+.wa-audio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 22px;
+  padding: 7px 12px;
+  min-width: 180px;
+}
+.wa-audio-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #b8860b, var(--gold));
+  color: #0a0810;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.76rem;
+  flex-shrink: 0;
+}
+.wa-audio-track {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.wa-audio-prog {
+  height: 100%;
+  width: 0%;
+  background: var(--gold);
+  transition: width 0.1s linear;
+}
+.wa-audio-dur {
+  font-size: 0.66rem;
+  color: var(--muted2);
+  flex-shrink: 0;
+  min-width: 28px;
+}
+
+/* ── Reply bar ────────────────────────────────────────────────── */
+.wa-reply-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(212, 168, 75, 0.07);
+  border-left: 3px solid var(--gold);
+  border-top: 1px solid rgba(212, 168, 75, 0.15);
+  padding: 7px 12px;
+  flex-shrink: 0;
+  animation: waSlideUp 0.15s ease;
+}
+@keyframes waSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.wa-reply-inner {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--gold);
+  font-size: 0.78rem;
+}
+.wa-reply-inner span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.wa-reply-bar > button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.88rem;
+  padding: 3px 6px;
+  border-radius: 6px;
+}
+.wa-reply-bar > button:hover {
+  color: var(--danger);
+}
+
+/* ── Input bar ────────────────────────────────────────────────── */
+.wa-input-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: rgba(14, 11, 22, 0.97);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.wa-text-input {
+  flex: 1;
+  background: rgba(38, 30, 58, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  padding: 9px 16px;
+  color: var(--text);
+  font-family: "Quicksand", sans-serif;
+  font-size: 0.87rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.wa-text-input:focus {
+  border-color: var(--gold);
+}
+.wa-text-input::placeholder {
+  color: var(--muted);
+}
+.wa-bar-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.95rem;
+  padding: 7px 8px;
+  border-radius: 50%;
+  transition:
+    color 0.15s,
+    background 0.15s;
+  flex-shrink: 0;
+}
+.wa-bar-btn:hover {
+  color: var(--gold);
+  background: rgba(212, 168, 75, 0.08);
+}
+.wa-bar-btn.rec-btn.recording {
+  color: var(--danger);
+  animation: waPulseRec 0.8s ease-in-out infinite;
+}
+@keyframes waPulseRec {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+.wa-send-btn {
+  background: linear-gradient(135deg, #b8860b, var(--gold));
+  color: #0a0810;
+  border: none;
+  border-radius: 50%;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.88rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  box-shadow: 0 3px 12px rgba(212, 168, 75, 0.3);
+  transition:
+    opacity 0.2s,
+    transform 0.15s;
+}
+.wa-send-btn:hover {
+  opacity: 0.88;
+  transform: scale(1.06);
+}
+
+/* ── Emoji picker ─────────────────────────────────────────────── */
+.wa-emoji-picker {
+  position: absolute;
+  bottom: 60px;
+  left: 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px;
+  z-index: 50;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  animation: waSlideUp 0.15s ease;
+}
+.wa-emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 3px;
+}
+.wa-emoji-btn-pick {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.25rem;
+  padding: 4px;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+.wa-emoji-btn-pick:hover {
+  background: rgba(212, 168, 75, 0.1);
+}
+
+/* ── Lightbox ─────────────────────────────────────────────────── */
+.wa-lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.93);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  cursor: zoom-out;
+}
+.wa-lightbox img {
+  max-width: 100%;
+  max-height: 90vh;
+  border-radius: 12px;
+  object-fit: contain;
+  cursor: default;
+}
+.wa-lightbox button {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  color: #fff;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+/* ── PDF modal ────────────────────────────────────────────────── */
+.wa-pdf-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.wa-pdf-modal-inner {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  width: 100%;
+  max-width: 860px;
+  height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.6);
+}
+.wa-pdf-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  font-size: 0.88rem;
+  color: var(--text);
+  gap: 12px;
+}
+.wa-pdf-hd span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wa-pdf-dl {
+  color: var(--gold);
+  text-decoration: none;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+.wa-pdf-hd button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 2px 6px;
+}
+.wa-pdf-modal-inner iframe {
+  flex: 1;
+  border: none;
+  background: #fff;
+}
+
+/* ── Responsive ───────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .wa-shell {
+    grid-template-columns: 1fr;
+    position: relative;
+    overflow: hidden;
+  }
+  .wa-sidebar {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    background: rgba(14, 11, 22, 0.98);
+    transition: transform 0.25s ease;
+  }
+  .wa-sidebar.hidden {
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
+  .wa-main {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    transition: transform 0.25s ease;
+  }
+  .wa-main.hidden {
+    transform: translateX(100%);
+    pointer-events: none;
+  }
+  .wa-back {
+    display: flex !important;
+  }
+}

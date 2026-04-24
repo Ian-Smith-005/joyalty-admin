@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
     <title>Joyalty Admin</title>
-    <link rel="manifest" href="/admin/manifest.json" />
+    <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#0a0810" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -17,6 +17,11 @@
     />
     <link rel="apple-touch-icon" href="/admin/icons/icon-192.png" />
     <link
+      rel="shortcut icon"
+      href="https://joyaltyphotography.netlify.app/images/templatemo-logo.png"
+      type="image/x-icon"
+    />
+    <link
       href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&family=Quintessential&display=swap"
       rel="stylesheet"
     />
@@ -24,21 +29,16 @@
       src="https://kit.fontawesome.com/f3068f95b3.js"
       crossorigin="anonymous"
     ></script>
-    <link
-      rel="shortcut icon"
-      href="https://joyaltyphotography.netlify.app/images/templatemo-logo.png"
-      type="image/x-icon"
-    />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+    <!-- auth.js is at assets/auth.js — same level as index.html -->
     <script src="assets/auth.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <link rel="stylesheet" href="assets/admin.css" />
 
-    <!-- Auth guard + config fetch — BEFORE admin.js -->
     <script>
-      // 1. Auth guard: redirect to login if not authenticated
+      // ── Auth guard: redirect to /admin/login/ if not signed in ──
       window.__authReady = new Promise((resolve) => {
         window.joyaltyAuth.checkAuthState(
           (user) => resolve(user),
@@ -48,7 +48,7 @@
         );
       });
 
-      // 2. Fetch Supabase public config
+      // ── Config fetch ──────────────────────────────────────────
       window.__configReady = fetch("/api/config")
         .then((r) => r.json())
         .then((d) => {
@@ -57,7 +57,7 @@
         })
         .catch((e) => console.error("[config]", e.message));
 
-      // 3. Load admin.js only after both complete
+      // ── Load admin.js only after both resolve ─────────────────
       Promise.all([window.__authReady, window.__configReady]).then(([user]) => {
         window.__currentUser = user;
         const s = document.createElement("script");
@@ -66,11 +66,10 @@
       });
     </script>
   </head>
-
   <body>
     <div id="toastWrap" aria-live="polite"></div>
 
-    <!-- Sidebar -->
+    <!-- ── SIDEBAR ───────────────────────────────────────────────── -->
     <aside class="sidebar" id="sidebar">
       <div class="sb-header">
         <img
@@ -131,7 +130,7 @@
     </aside>
     <div class="sb-overlay" id="sbOverlay" onclick="closeSidebar()"></div>
 
-    <!-- Main -->
+    <!-- ── MAIN ──────────────────────────────────────────────────── -->
     <div class="main-wrap">
       <header class="topbar">
         <button class="hamburger" id="hamburger" onclick="toggleSidebar()">
@@ -152,7 +151,7 @@
             class="icon-btn notif-btn"
             id="notifBtn"
             onclick="requestNotifPerm()"
-            title="Enable notifications"
+            title="Notifications"
           >
             <i class="fa-solid fa-bell"></i>
             <span class="notif-dot" id="notifDot" style="display: none"></span>
@@ -254,9 +253,7 @@
         <!-- CLIENTS -->
         <section class="tab" id="tab-clients">
           <div class="glass-card table-card">
-            <div class="table-hd">
-              <h6>All Clients</h6>
-            </div>
+            <div class="table-hd"><h6>All Clients</h6></div>
             <div class="tbl-scroll">
               <table class="admin-table">
                 <thead>
@@ -277,9 +274,7 @@
         <section class="tab" id="tab-email">
           <div id="emailAlert" class="alert"></div>
           <div class="glass-card form-card">
-            <div class="form-hd">
-              <h6>Compose Email</h6>
-            </div>
+            <div class="form-hd"><h6>Compose Email</h6></div>
             <div class="form-body">
               <div class="field-row">
                 <div class="field-group">
@@ -317,9 +312,182 @@
           </div>
         </section>
 
-        <!-- CHAT -->
+        <!-- CHAT — WhatsApp-style, plain HTML/JS, no framework needed -->
         <section class="tab" id="tab-chat">
-          <div id="admin-chat-mount" style="height: 100%"></div>
+          <div class="wa-shell glass-card">
+            <!-- Sidebar: session list -->
+            <div class="wa-sidebar" id="waSidebar">
+              <div class="wa-sidebar-hd">
+                <span class="wa-sidebar-title">Messages</span>
+                <div class="wa-mode-pills">
+                  <button
+                    class="wa-pill active"
+                    id="pillBot"
+                    onclick="waSetMode('bot')"
+                  >
+                    <i class="fa-solid fa-robot"></i> Joy AI
+                  </button>
+                  <button
+                    class="wa-pill"
+                    id="pillLive"
+                    onclick="waSetMode('live')"
+                  >
+                    <i class="fa-solid fa-signal"></i> Live
+                  </button>
+                </div>
+              </div>
+              <div class="wa-session-list" id="waSessionList"></div>
+            </div>
+
+            <!-- Main chat area -->
+            <div class="wa-main" id="waMain">
+              <div class="wa-main-hd" id="waMainHd">
+                <button class="wa-back" onclick="waShowSidebar()">
+                  <i class="fa-solid fa-arrow-left"></i>
+                </button>
+                <div class="wa-hd-ava" id="waHdAva">A</div>
+                <div class="wa-hd-info">
+                  <div class="wa-hd-name" id="waHdName">
+                    Select a conversation
+                  </div>
+                  <div class="wa-hd-sub" id="waHdSub">
+                    <span
+                      class="wa-online-dot"
+                      id="waOnlineDot"
+                      style="display: none"
+                    ></span
+                    ><span id="waHdSubTxt">—</span>
+                  </div>
+                </div>
+                <div class="wa-hd-actions">
+                  <button
+                    class="wa-icon-btn"
+                    onclick="waClearChat()"
+                    title="Clear"
+                  >
+                    <i class="fa-solid fa-broom"></i>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Typing indicator -->
+              <div class="wa-typing-bar" id="waTypingBar" style="display: none">
+                <span id="waTypingLabel">typing</span>
+                <span class="wa-typing-dots"
+                  ><span></span><span></span><span></span
+                ></span>
+              </div>
+
+              <!-- Message list -->
+              <div class="wa-msgs" id="waMsgs">
+                <div class="wa-empty-state" id="waEmptyState">
+                  <i class="fa-solid fa-comments"></i>
+                  <p>Select a conversation to start chatting</p>
+                </div>
+              </div>
+
+              <!-- Reply bar -->
+              <div class="wa-reply-bar" id="waReplyBar" style="display: none">
+                <div class="wa-reply-inner">
+                  <i class="fa-solid fa-reply"></i>
+                  <span id="waReplyText"></span>
+                </div>
+                <button onclick="waClearReply()">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+
+              <!-- Input bar -->
+              <div class="wa-input-bar">
+                <button
+                  class="wa-bar-btn"
+                  onclick="waOpenEmoji()"
+                  title="Emoji"
+                  id="waEmojiBtn"
+                >
+                  <i class="fa-solid fa-face-smile"></i>
+                </button>
+                <button class="wa-bar-btn" onclick="waAttach()" title="Attach">
+                  <i class="fa-solid fa-paperclip"></i>
+                </button>
+                <input
+                  type="file"
+                  id="waFileInput"
+                  accept="image/*,.pdf,audio/*"
+                  style="display: none"
+                  onchange="waHandleFile(this)"
+                />
+                <input
+                  type="text"
+                  id="waInput"
+                  class="wa-text-input"
+                  placeholder="Type a message…"
+                  onkeypress="
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      waSend();
+                    }
+                  "
+                  oninput="waBroadcastTyping(true)"
+                />
+                <button
+                  class="wa-bar-btn rec-btn"
+                  id="waRecBtn"
+                  onclick="waToggleRec(this)"
+                  title="Voice note"
+                >
+                  <i class="fa-solid fa-microphone"></i>
+                </button>
+                <button class="wa-send-btn" onclick="waSend()">
+                  <i class="fa-solid fa-paper-plane"></i>
+                </button>
+              </div>
+
+              <!-- Emoji picker -->
+              <div
+                class="wa-emoji-picker"
+                id="waEmojiPicker"
+                style="display: none"
+              >
+                <div class="wa-emoji-grid" id="waEmojiGrid"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Image lightbox -->
+          <div
+            class="wa-lightbox"
+            id="waLightbox"
+            style="display: none"
+            onclick="waCloseLightbox()"
+          >
+            <img id="waLightboxImg" src="" alt="" />
+            <button onclick="waCloseLightbox()">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+
+          <!-- PDF modal -->
+          <div class="wa-pdf-modal" id="waPdfModal" style="display: none">
+            <div class="wa-pdf-modal-inner">
+              <div class="wa-pdf-hd">
+                <span id="waPdfName"></span>
+                <div style="display: flex; gap: 10px; align-items: center">
+                  <a
+                    id="waPdfDownload"
+                    href="#"
+                    target="_blank"
+                    class="wa-pdf-dl"
+                    ><i class="fa-solid fa-download"></i> Download</a
+                  >
+                  <button onclick="waClosePdf()">
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+              </div>
+              <iframe id="waPdfFrame" src="" title="PDF"></iframe>
+            </div>
+          </div>
         </section>
 
         <!-- ANALYTICS -->
@@ -345,9 +513,7 @@
           <div id="profileAlert" class="alert"></div>
           <div class="profile-grid">
             <div class="glass-card form-card">
-              <div class="form-hd">
-                <h6>Your Profile</h6>
-              </div>
+              <div class="form-hd"><h6>Your Profile</h6></div>
               <div class="form-body">
                 <div class="ava-row">
                   <div class="ava-preview" id="avaPreview">A</div>
@@ -408,9 +574,7 @@
               </div>
             </div>
             <div class="glass-card form-card">
-              <div class="form-hd">
-                <h6>Security</h6>
-              </div>
+              <div class="form-hd"><h6>Security</h6></div>
               <div class="form-body">
                 <div id="pwAlert" class="alert"></div>
                 <div class="field-group">
@@ -437,9 +601,7 @@
               </div>
             </div>
             <div class="glass-card form-card">
-              <div class="form-hd">
-                <h6>Notifications</h6>
-              </div>
+              <div class="form-hd"><h6>Notifications</h6></div>
               <div class="form-body">
                 <div class="toggle-row">
                   <div>
@@ -486,9 +648,7 @@
               </div>
             </div>
             <div class="glass-card form-card">
-              <div class="form-hd">
-                <h6>App Info</h6>
-              </div>
+              <div class="form-hd"><h6>App Info</h6></div>
               <div class="form-body">
                 <div class="info-row">
                   <span>Version</span><strong>1.0.0</strong>
@@ -534,7 +694,6 @@
       </button>
     </nav>
 
-    <!-- More Sheet -->
     <div class="more-sheet" id="moreSheet">
       <div class="more-drag"></div>
       <button
@@ -671,10 +830,9 @@
             <i class="fa-solid fa-xmark"></i>
           </button>
         </div>
-        <div class="modal-body">
+        <div class="modal-body" id="deleteModalBody">
           <p style="color: var(--muted); font-size: 0.9rem; line-height: 1.6">
-            This cannot be undone. The booking, payment and receipt will be
-            permanently removed.
+            This cannot be undone.
           </p>
         </div>
         <input type="hidden" id="deleteId" />
@@ -695,10 +853,9 @@
     <script>
       if ("serviceWorker" in navigator) {
         navigator.serviceWorker
-          .register("/admin/sw.js", { scope: "/admin/" })
+          .register("/sw.js", { scope: "/admin/" })
           .catch(() => {});
       }
     </script>
-    <script src="assets/auth.js"></script>
   </body>
 </html>
