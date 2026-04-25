@@ -30,15 +30,26 @@
       crossorigin="anonymous"
     ></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-    <!-- auth.js is at assets/auth.js — same level as index.html -->
+    <!-- auth.js is at assets/auth.js — same directory as index.html -->
     <script src="assets/auth.js"></script>
+    <!-- Supabase browser bundle (UMD — exposes window.supabase) -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <link rel="stylesheet" href="assets/admin.css" />
+    <link rel="stylesheet" href="assets/admin-wa.css" />
 
+    <!--
+    Auth guard + Supabase config loader.
+    admin.js and admin-wa.js are injected dynamically only AFTER
+    both Firebase auth and /api/config have resolved.
+    This prevents:
+      - Login flash (auth guard redirects before body renders)
+      - "SUPABASE_URL not set" (config is fetched before any JS runs)
+  -->
     <script>
-      // ── Auth guard: redirect to /admin/login/ if not signed in ──
+      // 1. Auth guard — redirect to /admin/login/ if not signed in
       window.__authReady = new Promise((resolve) => {
         window.joyaltyAuth.checkAuthState(
           (user) => resolve(user),
@@ -48,28 +59,44 @@
         );
       });
 
-      // ── Config fetch ──────────────────────────────────────────
+      // 2. Fetch Supabase public keys from /api/config (server reads env vars)
       window.__configReady = fetch("/api/config")
         .then((r) => r.json())
         .then((d) => {
-          window.SUPABASE_URL = d.supabaseUrl;
-          window.SUPABASE_ANON = d.supabaseAnon;
+          window.SUPABASE_URL = d.supabaseUrl || "";
+          window.SUPABASE_ANON = d.supabaseAnon || "";
+          console.log(
+            "[config] Supabase URL:",
+            window.SUPABASE_URL ? "OK" : "MISSING",
+          );
         })
-        .catch((e) => console.error("[config]", e.message));
+        .catch((e) => {
+          console.error("[config] Failed to load:", e.message);
+          window.SUPABASE_URL = "";
+          window.SUPABASE_ANON = "";
+        });
 
-      // ── Load admin.js only after both resolve ─────────────────
+      // 3. Load admin.js then admin-wa.js only after both settle
       Promise.all([window.__authReady, window.__configReady]).then(([user]) => {
         window.__currentUser = user;
-        const s = document.createElement("script");
-        s.src = "assets/admin.js";
-        document.body.appendChild(s);
+
+        // Load admin.js first (sets up state, tabs, etc.)
+        const s1 = document.createElement("script");
+        s1.src = "assets/admin.js";
+        s1.onload = () => {
+          // Then load admin-wa.js (chat — depends on sbClient from admin.js)
+          const s2 = document.createElement("script");
+          s2.src = "assets/admin-wa.js";
+          document.body.appendChild(s2);
+        };
+        document.body.appendChild(s1);
       });
     </script>
   </head>
   <body>
     <div id="toastWrap" aria-live="polite"></div>
 
-    <!-- ── SIDEBAR ───────────────────────────────────────────────── -->
+    <!-- ── SIDEBAR ─────────────────────────────────────────────── -->
     <aside class="sidebar" id="sidebar">
       <div class="sb-header">
         <img
@@ -130,7 +157,7 @@
     </aside>
     <div class="sb-overlay" id="sbOverlay" onclick="closeSidebar()"></div>
 
-    <!-- ── MAIN ──────────────────────────────────────────────────── -->
+    <!-- ── MAIN ────────────────────────────────────────────────── -->
     <div class="main-wrap">
       <header class="topbar">
         <button class="hamburger" id="hamburger" onclick="toggleSidebar()">
@@ -225,8 +252,9 @@
               <h6>All Bookings</h6>
               <div class="table-hd-btns">
                 <button class="btn-outline-sm" onclick="loadBookings()">
-                  <i class="fa-solid fa-rotate-right"></i></button
-                ><button class="btn-accent-sm" onclick="openCreateBooking()">
+                  <i class="fa-solid fa-rotate-right"></i>
+                </button>
+                <button class="btn-accent-sm" onclick="openCreateBooking()">
                   <i class="fa-solid fa-plus"></i> New
                 </button>
               </div>
@@ -312,7 +340,7 @@
           </div>
         </section>
 
-        <!-- CHAT — WhatsApp-style, plain HTML/JS, no framework needed -->
+        <!-- CHAT — WhatsApp-style, powered by admin-wa.js -->
         <section class="tab" id="tab-chat">
           <div class="wa-shell glass-card">
             <!-- Sidebar: session list -->
@@ -339,38 +367,38 @@
               <div class="wa-session-list" id="waSessionList"></div>
             </div>
 
-            <!-- Main chat area -->
+            <!-- Chat main -->
             <div class="wa-main" id="waMain">
-              <div class="wa-main-hd" id="waMainHd">
+              <div class="wa-main-hd">
                 <button class="wa-back" onclick="waShowSidebar()">
                   <i class="fa-solid fa-arrow-left"></i>
                 </button>
-                <div class="wa-hd-ava" id="waHdAva">A</div>
+                <div class="wa-hd-ava" id="waHdAva">J</div>
                 <div class="wa-hd-info">
                   <div class="wa-hd-name" id="waHdName">
                     Select a conversation
                   </div>
-                  <div class="wa-hd-sub" id="waHdSub">
+                  <div class="wa-hd-sub">
                     <span
                       class="wa-online-dot"
                       id="waOnlineDot"
                       style="display: none"
-                    ></span
-                    ><span id="waHdSubTxt">—</span>
+                    ></span>
+                    <span id="waHdSubTxt">—</span>
                   </div>
                 </div>
                 <div class="wa-hd-actions">
                   <button
                     class="wa-icon-btn"
                     onclick="waClearChat()"
-                    title="Clear"
+                    title="Clear chat"
                   >
                     <i class="fa-solid fa-broom"></i>
                   </button>
                 </div>
               </div>
 
-              <!-- Typing indicator -->
+              <!-- Typing bar -->
               <div class="wa-typing-bar" id="waTypingBar" style="display: none">
                 <span id="waTypingLabel">typing</span>
                 <span class="wa-typing-dots"
@@ -378,7 +406,7 @@
                 ></span>
               </div>
 
-              <!-- Message list -->
+              <!-- Messages -->
               <div class="wa-msgs" id="waMsgs">
                 <div class="wa-empty-state" id="waEmptyState">
                   <i class="fa-solid fa-comments"></i>
@@ -386,7 +414,7 @@
                 </div>
               </div>
 
-              <!-- Reply bar -->
+              <!-- Reply bar (injected by admin-wa.js when quoting) -->
               <div class="wa-reply-bar" id="waReplyBar" style="display: none">
                 <div class="wa-reply-inner">
                   <i class="fa-solid fa-reply"></i>
@@ -398,16 +426,20 @@
               </div>
 
               <!-- Input bar -->
-              <div class="wa-input-bar">
+              <div class="wa-input-bar" style="position: relative">
                 <button
                   class="wa-bar-btn"
+                  id="waEmojiBtn"
                   onclick="waOpenEmoji()"
                   title="Emoji"
-                  id="waEmojiBtn"
                 >
                   <i class="fa-solid fa-face-smile"></i>
                 </button>
-                <button class="wa-bar-btn" onclick="waAttach()" title="Attach">
+                <button
+                  class="wa-bar-btn"
+                  onclick="waAttach()"
+                  title="Attach file"
+                >
                   <i class="fa-solid fa-paperclip"></i>
                 </button>
                 <input
@@ -431,7 +463,7 @@
                   oninput="waBroadcastTyping(true)"
                 />
                 <button
-                  class="wa-bar-btn rec-btn"
+                  class="wa-bar-btn"
                   id="waRecBtn"
                   onclick="waToggleRec(this)"
                   title="Voice note"
@@ -441,15 +473,14 @@
                 <button class="wa-send-btn" onclick="waSend()">
                   <i class="fa-solid fa-paper-plane"></i>
                 </button>
-              </div>
-
-              <!-- Emoji picker -->
-              <div
-                class="wa-emoji-picker"
-                id="waEmojiPicker"
-                style="display: none"
-              >
-                <div class="wa-emoji-grid" id="waEmojiGrid"></div>
+                <!-- Emoji picker (positioned absolute inside this div) -->
+                <div
+                  class="wa-emoji-picker"
+                  id="waEmojiPicker"
+                  style="display: none"
+                >
+                  <div class="wa-emoji-grid" id="waEmojiGrid"></div>
+                </div>
               </div>
             </div>
           </div>
@@ -462,7 +493,12 @@
             onclick="waCloseLightbox()"
           >
             <img id="waLightboxImg" src="" alt="" />
-            <button onclick="waCloseLightbox()">
+            <button
+              onclick="
+                event.stopPropagation();
+                waCloseLightbox();
+              "
+            >
               <i class="fa-solid fa-xmark"></i>
             </button>
           </div>
@@ -471,12 +507,13 @@
           <div class="wa-pdf-modal" id="waPdfModal" style="display: none">
             <div class="wa-pdf-modal-inner">
               <div class="wa-pdf-hd">
-                <span id="waPdfName"></span>
+                <span id="waPdfName">Document</span>
                 <div style="display: flex; gap: 10px; align-items: center">
                   <a
                     id="waPdfDownload"
                     href="#"
                     target="_blank"
+                    rel="noopener"
                     class="wa-pdf-dl"
                     ><i class="fa-solid fa-download"></i> Download</a
                   >
@@ -485,7 +522,7 @@
                   </button>
                 </div>
               </div>
-              <iframe id="waPdfFrame" src="" title="PDF"></iframe>
+              <iframe id="waPdfFrame" src="" title="PDF viewer"></iframe>
             </div>
           </div>
         </section>
@@ -520,7 +557,8 @@
                   <div>
                     <label class="btn-outline-sm upload-lbl" for="avaInput"
                       ><i class="fa-solid fa-camera"></i> Change Photo</label
-                    ><input
+                    >
+                    <input
                       type="file"
                       id="avaInput"
                       accept="image/*"
@@ -541,8 +579,8 @@
                     />
                   </div>
                   <div class="field-group">
-                    <label>Email</label
-                    ><input
+                    <label>Email</label>
+                    <input
                       type="email"
                       id="profileEmail"
                       class="field-input"
@@ -560,8 +598,8 @@
                   />
                 </div>
                 <div class="field-group">
-                  <label>Phone</label
-                  ><input
+                  <label>Phone</label>
+                  <input
                     type="tel"
                     id="profilePhone"
                     class="field-input"
@@ -573,13 +611,14 @@
                 </button>
               </div>
             </div>
+
             <div class="glass-card form-card">
               <div class="form-hd"><h6>Security</h6></div>
               <div class="form-body">
                 <div id="pwAlert" class="alert"></div>
                 <div class="field-group">
-                  <label>New Password</label
-                  ><input
+                  <label>New Password</label>
+                  <input
                     type="password"
                     id="newPw"
                     class="field-input"
@@ -600,6 +639,7 @@
                 </button>
               </div>
             </div>
+
             <div class="glass-card form-card">
               <div class="form-hd"><h6>Notifications</h6></div>
               <div class="form-body">
@@ -647,20 +687,21 @@
                 <p class="hint" id="notifStatus"></p>
               </div>
             </div>
+
             <div class="glass-card form-card">
               <div class="form-hd"><h6>App Info</h6></div>
               <div class="form-body">
                 <div class="info-row">
-                  <span>Version</span><strong>1.0.0</strong>
+                  <span>Version</span> <strong>1.0.0</strong>
                 </div>
                 <div class="info-row">
-                  <span>Database</span><strong>Supabase</strong>
+                  <span>Database</span> <strong>Supabase</strong>
                 </div>
                 <div class="info-row">
-                  <span>Auth</span><strong>Firebase</strong>
+                  <span>Auth</span> <strong>Firebase</strong>
                 </div>
                 <div class="info-row">
-                  <span>Hosting</span><strong>Cloudflare Pages</strong>
+                  <span>Hosting</span> <strong>Cloudflare Pages</strong>
                 </div>
                 <hr class="divider" />
                 <button class="btn-danger-sm" onclick="doLogout()">
@@ -673,27 +714,28 @@
       </main>
     </div>
 
-    <!-- Bottom Nav -->
+    <!-- ── BOTTOM NAV ──────────────────────────────────────────── -->
     <nav class="bottom-nav" id="bottomNav">
       <button class="bn-item active" data-tab="overview">
-        <i class="fa-solid fa-chart-pie"></i><span>Home</span>
+        <i class="fa-solid fa-chart-pie"></i> <span>Home</span>
       </button>
       <button class="bn-item" data-tab="bookings">
-        <i class="fa-solid fa-calendar-check"></i><span>Bookings</span
+        <i class="fa-solid fa-calendar-check"></i> <span>Bookings</span
         ><span class="bn-badge" id="bnPending" style="display: none">0</span>
       </button>
       <button class="bn-item" data-tab="clients">
-        <i class="fa-solid fa-users"></i><span>Clients</span>
+        <i class="fa-solid fa-users"></i> <span>Clients</span>
       </button>
       <button class="bn-item" data-tab="chat">
-        <i class="fa-solid fa-comments"></i><span>Chat</span
+        <i class="fa-solid fa-comments"></i> <span>Chat</span
         ><span class="bn-badge" id="bnChat" style="display: none">!</span>
       </button>
       <button class="bn-item" onclick="openMore()">
-        <i class="fa-solid fa-ellipsis"></i><span>More</span>
+        <i class="fa-solid fa-ellipsis"></i> <span>More</span>
       </button>
     </nav>
 
+    <!-- More sheet -->
     <div class="more-sheet" id="moreSheet">
       <div class="more-drag"></div>
       <button
@@ -730,7 +772,7 @@
     </div>
     <div class="sheet-overlay" id="sheetOverlay" onclick="closeMore()"></div>
 
-    <!-- Booking Modal -->
+    <!-- ── BOOKING MODAL ───────────────────────────────────────── -->
     <div class="modal-wrap" id="bookingModal">
       <div class="glass-card modal-card">
         <div class="modal-hd">
@@ -751,8 +793,8 @@
               />
             </div>
             <div class="field-group">
-              <label>Email</label
-              ><input id="bm-email" type="email" class="field-input" />
+              <label>Email</label>
+              <input id="bm-email" type="email" class="field-input" />
             </div>
           </div>
           <div class="field-row">
@@ -761,8 +803,8 @@
               ><input id="bm-phone" class="field-input" placeholder="+254…" />
             </div>
             <div class="field-group">
-              <label>Service</label
-              ><select id="bm-service" class="field-input">
+              <label>Service</label>
+              <select id="bm-service" class="field-input">
                 <option value="">Choose…</option>
                 <option>Wedding Photography</option>
                 <option>Portrait Session</option>
@@ -775,16 +817,16 @@
           </div>
           <div class="field-row">
             <div class="field-group">
-              <label>Package</label
-              ><select id="bm-package" class="field-input">
+              <label>Package</label>
+              <select id="bm-package" class="field-input">
                 <option>Standard</option>
                 <option>Premium</option>
                 <option>Luxury</option>
               </select>
             </div>
             <div class="field-group">
-              <label>Extra</label
-              ><select id="bm-extra" class="field-input">
+              <label>Extra</label>
+              <select id="bm-extra" class="field-input">
                 <option>None</option>
                 <option>Drone Coverage</option>
                 <option>Photo Album</option>
@@ -798,8 +840,8 @@
               ><input id="bm-date" type="date" class="field-input" />
             </div>
             <div class="field-group">
-              <label>Location</label
-              ><input
+              <label>Location</label>
+              <input
                 id="bm-location"
                 class="field-input"
                 placeholder="Venue…"
@@ -813,15 +855,16 @@
         </div>
         <div class="modal-ft">
           <button class="btn-accent-sm" onclick="submitBooking()">
-            Save Booking</button
-          ><button class="btn-outline-sm" onclick="closeModal('bookingModal')">
+            Save Booking
+          </button>
+          <button class="btn-outline-sm" onclick="closeModal('bookingModal')">
             Cancel
           </button>
         </div>
       </div>
     </div>
 
-    <!-- Delete Modal -->
+    <!-- ── DELETE MODAL ────────────────────────────────────────── -->
     <div class="modal-wrap" id="deleteModal">
       <div class="glass-card modal-card" style="max-width: 400px">
         <div class="modal-hd">
@@ -842,8 +885,9 @@
             id="confirmDeleteBtn"
             onclick="confirmDelete()"
           >
-            Yes, Delete</button
-          ><button class="btn-outline-sm" onclick="closeModal('deleteModal')">
+            Yes, Delete
+          </button>
+          <button class="btn-outline-sm" onclick="closeModal('deleteModal')">
             Cancel
           </button>
         </div>

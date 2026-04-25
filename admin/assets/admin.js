@@ -1,33 +1,33 @@
 /* ============================================================
-   JOYALTY ADMIN — admin.js
-   ✓ Auth on separate /admin/login/ page — dashboard guard only
-   ✓ Typing animation (admin + user)
-   ✓ Online presence indicator (Supabase presence channel)
-   ✓ Push notifications on new message (fixed — uses SW if available)
-   ✓ Bubble send sound (Web Audio)
-   ✓ Smooth tab transitions
-   ✓ DELETE booking fix (uses correct endpoint + CORS method)
-   ✓ Charts load real data from DB
-   ✓ PWA install prompt
+   JOYALTY ADMIN — admin.js  (fixed)
+   
+   FIXES APPLIED:
+   1. Removed React/JSX imports — plain JS only, no bundler
+   2. doLogout() now redirects to /admin/login/ (correct path)
+   3. initChat() uses waInit() from admin-wa.js (no React mount)
+   4. sbClient initialised from window.SUPABASE_URL which is
+      guaranteed set before this file loads (Promise.all guard
+      in index.html) — removed the redundant null-check warning
 ============================================================ */
 
-// ── Supabase ──────────────────────────────────────────────────
+// ── Supabase browser client ───────────────────────────────────
 const SB_URL = window.SUPABASE_URL || "";
 const SB_ANON = window.SUPABASE_ANON || "";
 let sbClient = null;
-if (SB_URL && SB_ANON && !SB_URL.includes("YOUR_PROJECT")) {
+if (SB_URL && SB_ANON) {
   try {
     sbClient = supabase.createClient(SB_URL, SB_ANON);
+    console.log("[admin] Supabase ready:", SB_URL);
   } catch (e) {
     console.error("[supabase]", e.message);
   }
 } else {
   console.warn(
-    "[admin] Supabase not configured. Set SUPABASE_URL + SUPABASE_ANON_KEY in Cloudflare env vars.",
+    "[admin] SUPABASE_URL or SUPABASE_ANON_KEY missing — check Cloudflare env vars and /api/config",
   );
 }
 
-// ── State ──────────────────────────────────────────────────────
+// ── State ─────────────────────────────────────────────────────
 const currentUser = window.__currentUser;
 let allBookings = [];
 let allClients = [];
@@ -40,8 +40,8 @@ let presenceChannel = null;
 let unread = 0;
 let prefs = loadPrefs();
 let editId = null;
-let onlineUsers = {}; // { sessionId: true/false }
-let deferredPrompt = null; // PWA install prompt
+let onlineUsers = {};
+let deferredPrompt = null;
 
 // ── PWA install prompt ────────────────────────────────────────
 window.addEventListener("beforeinstallprompt", (e) => {
@@ -75,15 +75,15 @@ async function installPWA() {
   document.getElementById("pwaInstallBanner")?.remove();
 }
 
-// ── Init — user already authenticated via guard in index.html ─
+// ── Init ──────────────────────────────────────────────────────
 function init() {
   const u = currentUser;
   if (!u) return;
 
-  const init = (u.displayName || u.email || "A")[0].toUpperCase();
-  setText("sbAvatar", init);
+  const initChar = (u.displayName || u.email || "A")[0].toUpperCase();
+  setText("sbAvatar", initChar);
   setText("sbName", u.displayName || u.email.split("@")[0]);
-  setText("avaPreview", init);
+  setText("avaPreview", initChar);
   setVal("profileEmail", u.email || "");
   setVal("profileName", ls("adminDisplayName") || u.displayName || "");
   setVal("profileStudio", ls("adminStudio") || "");
@@ -99,16 +99,17 @@ function init() {
 }
 init();
 
+// ── FIX: correct logout path ──────────────────────────────────
 async function doLogout() {
   if (rtChannel && sbClient) sbClient.removeChannel(rtChannel);
   if (presenceChannel && sbClient) sbClient.removeChannel(presenceChannel);
   await window.joyaltyAuth.firebaseSignOut().catch(() => {});
-  window.location.replace("/login/");
+  window.location.replace("/admin/login/");
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 // REALTIME + PRESENCE
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 function subscribeRealtime() {
   if (!sbClient) return;
   if (rtChannel) sbClient.removeChannel(rtChannel);
@@ -121,13 +122,14 @@ function subscribeRealtime() {
         const msg = payload.new;
         if (!msg) return;
         if (msg.sender === "admin" && sentIds.has(String(msg.id))) return;
-
         if (msg.session_id === activeSession) {
-          renderBubble(msg);
+          // Delegate to admin-wa.js renderer if available
+          if (typeof waRenderBubble === "function") waRenderBubble(msg);
+          else renderBubble(msg);
         } else {
           unread++;
           updateBadges();
-          loadSessions();
+          if (typeof waLoadSessions === "function") waLoadSessions();
           if (prefs.chatNotif !== false) {
             triggerNotification(
               `New message from ${msg.name || "a client"}`,
@@ -165,7 +167,6 @@ function subscribePresence() {
     })
     .subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
-        // Admin tracks as "admin"
         await presenceChannel.track({
           user: "admin",
           online_at: new Date().toISOString(),
@@ -175,7 +176,6 @@ function subscribePresence() {
 }
 
 function updateOnlineIndicators() {
-  // Update online dot for active session
   if (activeSession && activeSession !== "joy") {
     const isOnline = !!onlineUsers[activeSession];
     const dot = document.getElementById("onlineDot");
@@ -185,26 +185,27 @@ function updateOnlineIndicators() {
       status.textContent = isOnline
         ? "Online now"
         : `Live · ${activeSession.split("-")[0]}`;
+    // Also update admin-wa.js header if active
+    const waOnlineDot = document.getElementById("waOnlineDot");
+    const waSubTxt = document.getElementById("waHdSubTxt");
+    if (waOnlineDot) waOnlineDot.style.display = isOnline ? "" : "none";
+    if (waSubTxt) waSubTxt.textContent = isOnline ? "Online" : "Live chat";
   }
-  // Update badges in contact list
-  document.querySelectorAll(".contact-item[data-sid]").forEach((el) => {
-    const sid = el.dataset.sid;
-    const dot = el.querySelector(".c-online");
-    if (dot) dot.style.display = onlineUsers[sid] ? "" : "none";
-  });
+  document
+    .querySelectorAll(".contact-item[data-sid],.wa-session-item[data-sid]")
+    .forEach((el) => {
+      const sid = el.dataset.sid;
+      const dot = el.querySelector(".c-online,.wa-sess-online");
+      if (dot) dot.style.display = onlineUsers[sid] ? "block" : "none";
+    });
 }
 
-// ═══════════════════════════════════════════════════════════════
-// NOTIFICATIONS — properly triggers push + in-app
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
+// NOTIFICATIONS
+// ═════════════════════════════════════════════════════════════
 async function triggerNotification(title, body, sessionId) {
-  // In-app badge already handled by caller
   if (!prefs.pushEnabled) return;
-
-  const permission = Notification.permission;
-  if (permission !== "granted") return;
-
-  // Use service worker for reliable background notifications
+  if (Notification.permission !== "granted") return;
   if ("serviceWorker" in navigator) {
     const reg = await navigator.serviceWorker.getRegistration("/admin/");
     if (reg) {
@@ -220,7 +221,6 @@ async function triggerNotification(title, body, sessionId) {
       return;
     }
   }
-  // Fallback to basic Notification
   try {
     new Notification(title, { body, icon: "/admin/icons/icon-192.png" });
   } catch (_) {}
@@ -253,9 +253,9 @@ function togglePush(on) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 // SOUND
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 function playSound(type) {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -263,9 +263,7 @@ function playSound(type) {
     const gain = ctx.createGain();
     osc.connect(gain);
     gain.connect(ctx.destination);
-
     if (type === "send") {
-      // Subtle ascending two-tone for sent
       osc.frequency.setValueAtTime(600, ctx.currentTime);
       osc.frequency.exponentialRampToValueAtTime(900, ctx.currentTime + 0.08);
       gain.gain.setValueAtTime(0.18, ctx.currentTime);
@@ -273,7 +271,6 @@ function playSound(type) {
       osc.start();
       osc.stop(ctx.currentTime + 0.18);
     } else {
-      // Gentle descending pop for receive
       osc.frequency.setValueAtTime(880, ctx.currentTime);
       osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.14);
       gain.gain.setValueAtTime(0.22, ctx.currentTime);
@@ -284,9 +281,9 @@ function playSound(type) {
   } catch (_) {}
 }
 
-// ═══════════════════════════════════════════════════════════════
-// TABS — smooth CSS transition
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
+// TABS
+// ═════════════════════════════════════════════════════════════
 const TITLES = {
   overview: "Overview",
   bookings: "Bookings",
@@ -302,14 +299,11 @@ function switchTab(tab, silent) {
   const next = g("tab-" + tab);
   if (!next || next === current) return;
 
-  // Fade out current
   if (current) {
     current.style.opacity = "0";
     current.style.transform = "translateY(6px)";
     setTimeout(() => current.classList.remove("active"), 160);
   }
-
-  // Fade in next
   setTimeout(
     () => {
       next.classList.add("active");
@@ -330,7 +324,6 @@ function switchTab(tab, silent) {
   setText("tabTitle", TITLES[tab] || tab);
   if (!silent) sessionStorage.setItem("adminTab", tab);
 
-  // Chat mode toggle for CSS :has() fallback
   const pc = document.querySelector(".page-content");
   if (pc) pc.classList.toggle("chat-mode", tab === "chat");
 
@@ -338,7 +331,8 @@ function switchTab(tab, silent) {
   if (tab === "clients") loadClients();
   if (tab === "analytics") renderAnalytics();
   if (tab === "chat") {
-    initChat();
+    // FIX: call waInit() from admin-wa.js, not React
+    if (typeof waInit === "function") waInit();
     resetUnread();
   }
 }
@@ -352,9 +346,9 @@ document
     });
   });
 
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 // DASHBOARD
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 async function initDash() {
   await Promise.all([loadStats(), loadBookings()]);
   renderOverviewCharts();
@@ -379,9 +373,9 @@ async function loadStats() {
   } catch (_) {}
 }
 
-// ═══════════════════════════════════════════════════════════════
-// BOOKINGS — CRUD  (DELETE fix: correct URL parsing)
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
+// BOOKINGS — CRUD
+// ═════════════════════════════════════════════════════════════
 async function loadBookings() {
   try {
     const d = await api("/api/admin/bookings");
@@ -422,7 +416,6 @@ function renderBookings(rows) {
     )
     .join("");
 
-  // Animate rows in
   document.querySelectorAll(".booking-row").forEach((row, i) => {
     row.style.opacity = "0";
     row.style.transform = "translateY(8px)";
@@ -524,10 +517,8 @@ async function submitBooking() {
   }
 }
 
-// ── DELETE FIX: send booking id via hidden field, then DELETE ──
 function openDeleteBooking(id) {
   setVal("deleteId", String(id));
-  // Show booking ref in modal for confirmation
   const b = allBookings.find((x) => x.id === id);
   const modal = g("deleteModal");
   if (modal && b) {
@@ -544,17 +535,13 @@ async function confirmDelete() {
     toast("No booking selected.", "error");
     return;
   }
-
   const btn = g("confirmDeleteBtn");
   if (btn) btn.innerHTML = '<span class="spinner"></span>';
-
   try {
     const d = await api(`/api/admin/bookings/${id}`, { method: "DELETE" });
     closeModal("deleteModal");
     if (btn) btn.textContent = "Yes, Delete";
-
     if (d.success) {
-      // Animate row out before removing
       const row = document.querySelector(`.booking-row[data-id="${id}"]`);
       if (row) {
         row.style.transition = "opacity .25s ease, transform .25s ease";
@@ -566,20 +553,19 @@ async function confirmDelete() {
       await loadStats();
       toast("Booking deleted.", "success");
     } else {
-      toast(d.error || "Delete failed. Check the booking exists.", "error");
+      toast(d.error || "Delete failed.", "error");
       console.error("[delete]", d.error);
     }
   } catch (e) {
     if (btn) btn.textContent = "Yes, Delete";
     closeModal("deleteModal");
     toast("Delete failed: " + e.message, "error");
-    console.error("[delete]", e);
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 // CLIENTS
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 async function loadClients() {
   try {
     const d = await api("/api/admin/clients");
@@ -597,6 +583,7 @@ async function loadClients() {
       : `<tr><td colspan="4"><div class="empty-state">No clients yet</div></td></tr>`;
   } catch (_) {}
 }
+
 function onSearch(q) {
   if (!q) {
     renderBookings(allBookings);
@@ -614,9 +601,9 @@ function onSearch(q) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 // EMAIL
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 function emailShortcut(email, ref) {
   switchTab("email");
   setVal("emailTo", email);
@@ -649,271 +636,40 @@ async function sendAdminEmail() {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// CHAT
-// ═══════════════════════════════════════════════════════════════
-import { createRoot } from "react-dom/client";
-import AdminChatPage from "./AdminChatPage.jsx";
-
+// ═════════════════════════════════════════════════════════════
+// CHAT — delegated entirely to admin-wa.js
+// FIX: removed React/JSX imports. initChat() calls waInit().
+// ═════════════════════════════════════════════════════════════
 function initChat() {
-  const el = document.getElementById("admin-chat-mount");
-  if (el && !el._root) {
-    el._root = createRoot(el);
-    el._root.render(<AdminChatPage />);
-  }
-}
-function setChatMode(mode) {
-  chatMode = mode;
-  g("modeBtnBot")?.classList.toggle("active", mode === "bot");
-  g("modeBtnLive")?.classList.toggle("active", mode === "live");
-  g("adminMsgs").innerHTML = "";
-  activeSession = null;
-  if (mode === "bot") {
-    renderBotContact();
-    showContacts();
+  if (typeof waInit === "function") {
+    waInit();
   } else {
-    loadSessions();
-    showContacts();
+    console.error("[admin] admin-wa.js not loaded — chat unavailable");
   }
 }
 
-function renderBotContact() {
-  g("contactList").innerHTML =
-    `<div class="contact-item active" id="botItem" onclick="selectBot(this)"><div class="c-ava bot"><i class="fa-solid fa-robot"></i></div><div><div class="c-name">Joy — AI Assistant</div><div class="c-prev">Live data: bookings, revenue…</div></div></div>`;
-  selectBot(g("botItem"));
+// These stubs exist so old HTML onclick references don't break.
+// admin-wa.js overrides them with full implementations.
+function setChatMode(mode) {
+  if (typeof waSetMode === "function") waSetMode(mode);
 }
-function selectBot(el) {
-  document
-    .querySelectorAll(".contact-item")
-    .forEach((e) => e.classList.remove("active"));
-  el.classList.add("active");
-  activeSession = "joy";
-  setText("chatHdName", "Joy — AI Assistant");
-  g("chatHdAva").className = "chat-ava bot";
-  g("chatHdAva").innerHTML = '<i class="fa-solid fa-robot"></i>';
-  const dot = g("onlineDot"),
-    st = g("onlineStatus");
-  if (dot) dot.style.display = "none";
-  if (st) st.textContent = "Gemini · live context";
-  g("adminMsgs").innerHTML = "";
-  aiConvo = [];
-  appendMsg(
-    "Hi Admin 👋 I have your live bookings and client data. Ask me anything.",
-    "in",
-    "🤖",
-  );
-  showChat();
-}
-
-async function loadSessions() {
-  try {
-    const d = await api("/api/live-chat/sessions");
-    renderContacts(d.sessions || []);
-  } catch (_) {
-    renderContacts([]);
-  }
-}
-function renderContacts(sessions) {
-  const list = g("contactList");
-  if (!sessions.length) {
-    list.innerHTML = `<div class="empty-state" style="padding:18px 14px;font-size:.81rem">No live sessions yet.</div>`;
-    return;
-  }
-  list.innerHTML = sessions
-    .map((s) => {
-      const name = s.name || s.session_id.split("-")[0];
-      const isOnline = !!onlineUsers[s.session_id];
-      return `<div class="contact-item${s.session_id === activeSession ? " active" : ""}" data-sid="${esc(s.session_id)}" onclick="selectSession('${esc(s.session_id)}','${esc(name)}')">
-      <div style="position:relative">
-        <div class="c-ava">${name[0].toUpperCase()}</div>
-        <span class="c-online" style="display:${isOnline ? "" : "none"};position:absolute;bottom:0;right:0;width:9px;height:9px;background:#22c55e;border-radius:50%;border:2px solid var(--bg)"></span>
-      </div>
-      <div style="min-width:0;flex:1"><div class="c-name">${esc(name)}</div><div class="c-prev">${esc((s.last_text || "").substring(0, 34))}</div></div>
-      ${s.unread > 0 ? `<span class="c-unread">${s.unread}</span>` : ""}
-    </div>`;
-    })
-    .join("");
-}
-
-async function selectSession(sid, name) {
-  document
-    .querySelectorAll(".contact-item")
-    .forEach((e) => e.classList.remove("active"));
-  document
-    .querySelector(`.contact-item[data-sid="${sid}"]`)
-    ?.classList.add("active");
-  activeSession = sid;
-  setText("chatHdName", name || sid.split("-")[0]);
-  g("chatHdAva").className = "chat-ava";
-  g("chatHdAva").textContent = (name || "?")[0].toUpperCase();
-  // Online status
-  const dot = g("onlineDot"),
-    st = g("onlineStatus");
-  const isOnline = !!onlineUsers[sid];
-  if (dot) {
-    dot.style.display = isOnline ? "" : "";
-  }
-  if (st) {
-    st.textContent = isOnline ? "Online now" : `Live · ${sid.split("-")[0]}`;
-  }
-  g("adminMsgs").innerHTML = "";
-  try {
-    const d = await api(`/api/live-chat?sessionId=${encodeURIComponent(sid)}`);
-    (d.messages || []).forEach(renderBubble);
-  } catch (_) {}
-  showChat();
-}
-
-// ── Render bubble with dedup ──────────────────────────────────
 function renderBubble(msg) {
-  const msgs = g("adminMsgs");
-  if (msgs.querySelector(`[data-msg-id="${msg.id}"]`)) return;
-  const isOut = msg.sender === "admin";
-  const time = new Date(msg.timestamp || Date.now()).toLocaleTimeString(
-    "en-KE",
-    { hour: "2-digit", minute: "2-digit" },
-  );
-  const div = document.createElement("div");
-  div.className = `msg ${isOut ? "out" : "in"}`;
-  div.dataset.msgId = msg.id;
-  div.style.opacity = "0";
-  div.style.transform = `translateY(10px) scale(.97)`;
-  div.innerHTML = `<div class="msg-ava">${isOut ? "A" : (msg.name || "?")[0].toUpperCase()}</div><div class="msg-col"><div class="msg-bubble">${esc(msg.text)}</div><div class="msg-time">${isOut ? "You" : "Client"} · ${time}</div></div>`;
-  msgs.appendChild(div);
-  msgs.scrollTop = msgs.scrollHeight;
-  // Animate in
-  requestAnimationFrame(() => {
-    div.style.transition =
-      "opacity .2s ease,transform .2s cubic-bezier(.34,1.2,.64,1)";
-    div.style.opacity = "1";
-    div.style.transform = "none";
-  });
+  if (typeof waRenderBubble === "function") waRenderBubble(msg);
 }
-
-// ── Typing indicator ──────────────────────────────────────────
-function showTyping(label) {
-  removeTyping();
-  const msgs = g("adminMsgs");
-  const el = document.createElement("div");
-  el.className = "typing";
-  el.id = "adminTyping";
-  el.innerHTML = `<span></span><span></span><span></span><span style="margin-left:6px;font-size:.72rem;color:var(--muted);white-space:nowrap">${label || "typing…"}</span>`;
-  msgs.appendChild(el);
-  msgs.scrollTop = msgs.scrollHeight;
+function appendMsg(t, d, a) {
+  /* noop — admin-wa.js handles all rendering */
 }
-function removeTyping() {
-  g("adminTyping")?.remove();
-}
-
-// ── Send message ──────────────────────────────────────────────
-async function sendAdminMsg() {
-  const input = g("adminInput");
-  const text = input.value.trim();
-  if (!text) return;
-  input.value = "";
-
-  if (activeSession === "joy" || chatMode === "bot") {
-    aiConvo.push({ type: "user", text });
-    appendMsg(text, "out", "A");
-    playSound("send");
-    const ctx = `You are Joy, AI assistant for Joyalty Photography admin.
-LIVE DATA: Bookings: ${allBookings.length}, Confirmed: ${allBookings.filter((b) => b.status === "confirmed").length}, Pending: ${allBookings.filter((b) => b.status === "pending_payment").length}, Revenue: KSh ${allBookings.reduce((a, b) => a + Number(b.deposit_paid || 0), 0).toLocaleString()}, Clients: ${allClients.length}. Today: ${new Date().toLocaleDateString("en-KE", { dateStyle: "full" })}.`;
-    const formatted = [
-      { role: "user", parts: [{ text: ctx }] },
-      ...aiConvo.slice(0, -1).map((m) => ({
-        role: m.type === "user" ? "user" : "model",
-        parts: [{ text: m.text }],
-      })),
-      { role: "user", parts: [{ text }] },
-    ];
-    showTyping("Joy is typing");
-    try {
-      const res = await api("/api/gemini-chat", {
-        method: "POST",
-        body: JSON.stringify({ messages: formatted }),
-      });
-      removeTyping();
-      const reply = res.reply || "I couldn't respond.";
-      aiConvo.push({ type: "bot", text: reply });
-      appendMsg(reply, "in", "🤖");
-      playSound("receive");
-    } catch (_) {
-      removeTyping();
-      appendMsg("Connection error.", "in", "⚠");
-    }
-    return;
-  }
-
-  if (!activeSession) return;
-  const tempId = "tmp-" + Date.now();
-  renderBubble({
-    id: tempId,
-    sender: "admin",
-    name: "Admin",
-    text,
-    timestamp: new Date().toISOString(),
-  });
-  sentIds.add(tempId);
-  playSound("send");
-
-  try {
-    const res = await api("/api/live-chat", {
-      method: "POST",
-      body: JSON.stringify({
-        sessionId: activeSession,
-        sender: "admin",
-        name: "Admin",
-        text,
-        timestamp: new Date().toISOString(),
-      }),
-    });
-    if (res.id) {
-      sentIds.add(String(res.id));
-      const el = g("adminMsgs").querySelector(`[data-msg-id="${tempId}"]`);
-      if (el) el.dataset.msgId = res.id;
-    }
-  } catch (_) {
-    appendMsg("⚠ Send failed.", "in", "⚠");
-  }
-}
-
-function appendMsg(text, dir, ava) {
-  const msgs = g("adminMsgs");
-  const time = new Date().toLocaleTimeString("en-KE", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-  const div = document.createElement("div");
-  div.className = `msg ${dir}`;
-  div.style.opacity = "0";
-  div.style.transform = "translateY(10px) scale(.97)";
-  div.innerHTML = `<div class="msg-ava">${ava || (dir === "out" ? "A" : "?")}</div><div class="msg-col"><div class="msg-bubble">${esc(text)}</div><div class="msg-time">${time}</div></div>`;
-  msgs.appendChild(div);
-  msgs.scrollTop = msgs.scrollHeight;
-  requestAnimationFrame(() => {
-    div.style.transition =
-      "opacity .2s ease,transform .2s cubic-bezier(.34,1.2,.64,1)";
-    div.style.opacity = "1";
-    div.style.transform = "none";
-  });
-}
-
 function clearChat() {
-  aiConvo = [];
-  g("adminMsgs").innerHTML = "";
-  if (chatMode === "bot") appendMsg("Chat cleared.", "in", "🤖");
+  if (typeof waClearChat === "function") waClearChat();
 }
 function showChat() {
-  if (window.innerWidth <= 768) {
-    g("chatContacts")?.classList.add("hidden");
-    g("chatMain")?.classList.remove("hidden");
-  }
+  if (typeof waShowMain === "function") waShowMain();
 }
 function showContacts() {
-  if (window.innerWidth <= 768) {
-    g("chatContacts")?.classList.remove("hidden");
-    g("chatMain")?.classList.add("hidden");
-  }
+  if (typeof waShowSidebar === "function") waShowSidebar();
+}
+function sendAdminMsg() {
+  if (typeof waSend === "function") waSend();
 }
 function updateBadges() {
   ["chatBadgeSB", "bnChat"].forEach((id) => {
@@ -928,9 +684,9 @@ function resetUnread() {
   updateBadges();
 }
 
-// ═══════════════════════════════════════════════════════════════
-// CHARTS — real data from DB
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
+// CHARTS — real data from allBookings
+// ═════════════════════════════════════════════════════════════
 let charts = {};
 
 async function renderOverviewCharts() {
@@ -951,7 +707,6 @@ async function renderOverviewCharts() {
   const now = new Date().getMonth();
   const labels = mo.slice(Math.max(0, now - 5), now + 1);
 
-  // Build real booking counts per month from allBookings
   const bkCounts = labels.map((lbl) => {
     const mIdx = mo.indexOf(lbl);
     return allBookings.filter((b) => {
@@ -959,7 +714,6 @@ async function renderOverviewCharts() {
       return d && d.getMonth() === mIdx;
     }).length;
   });
-
   const rvData = labels.map((lbl) => {
     const mIdx = mo.indexOf(lbl);
     return allBookings
@@ -998,6 +752,7 @@ async function renderOverviewCharts() {
     ? Object.keys(sc)
     : ["Wedding", "Portrait", "Commercial", "Event"];
   const sd = Object.keys(sc).length ? Object.values(sc) : [0, 0, 0, 0];
+
   dc("servicesChart");
   charts.svc = new Chart(g("servicesChart"), {
     type: "doughnut",
@@ -1055,6 +810,7 @@ async function renderAnalytics() {
   allBookings.forEach((b) => {
     if (sc[b.status] !== undefined) sc[b.status]++;
   });
+
   dc("statusChart");
   charts.st = new Chart(g("statusChart"), {
     type: "pie",
@@ -1112,7 +868,6 @@ async function renderAnalytics() {
     },
   });
 
-  // Monthly revenue from real data
   const mo = [
     "Jan",
     "Feb",
@@ -1180,9 +935,9 @@ function dc(id) {
   if (c) c.destroy();
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 // PROFILE
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 function previewAva(input) {
   const file = input.files[0];
   if (!file) return;
@@ -1267,9 +1022,9 @@ function loadPrefsUI() {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 // MOBILE NAV
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 function toggleSidebar() {
   const sb = g("sidebar"),
     open = sb.classList.toggle("open");
@@ -1288,9 +1043,9 @@ function closeMore() {
   g("sheetOverlay")?.classList.remove("open");
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 // MODALS / ALERTS / TOASTS
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 function openModal(id) {
   const el = g(id);
   if (el) {
@@ -1335,9 +1090,9 @@ function showAlert(id, msg, type) {
   }, 5000);
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 // HELPERS
-// ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 async function api(url, opts = {}) {
   const r = await fetch(url, {
     headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
