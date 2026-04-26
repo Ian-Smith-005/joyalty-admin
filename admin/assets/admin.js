@@ -3,7 +3,7 @@
    
    FIXES APPLIED:
    1. Removed React/JSX imports — plain JS only, no bundler
-   2. doLogout() now redirects to /admin/login/ (correct path)
+   2. doLogout() now redirects to /login/ (correct path)
    3. initChat() uses waInit() from admin-wa.js (no React mount)
    4. sbClient initialised from window.SUPABASE_URL which is
       guaranteed set before this file loads (Promise.all guard
@@ -104,7 +104,7 @@ async function doLogout() {
   if (rtChannel && sbClient) sbClient.removeChannel(rtChannel);
   if (presenceChannel && sbClient) sbClient.removeChannel(presenceChannel);
   await window.joyaltyAuth.firebaseSignOut().catch(() => {});
-  window.location.replace("/admin/login/");
+  window.location.replace("/login/");
 }
 
 // ═════════════════════════════════════════════════════════════

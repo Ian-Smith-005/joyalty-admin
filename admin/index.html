@@ -49,12 +49,12 @@
       - "SUPABASE_URL not set" (config is fetched before any JS runs)
   -->
     <script>
-      // 1. Auth guard — redirect to /admin/login/ if not signed in
+      // 1. Auth guard — redirect to /login/ if not signed in
       window.__authReady = new Promise((resolve) => {
         window.joyaltyAuth.checkAuthState(
           (user) => resolve(user),
           () => {
-            window.location.replace("/admin/login/");
+            window.location.replace("/login/");
           },
         );
       });
