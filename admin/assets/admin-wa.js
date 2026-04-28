@@ -1,12 +1,11 @@
 /* ================================================================
-   JOYALTY ADMIN — admin-wa.js
-   WhatsApp-style chat logic for the admin panel.
-   Plain vanilla JS, no framework, no bundler required.
-   Load AFTER admin.js in admin/index.html:
-     <script src="assets/admin-wa.js"></script>
+   JOYALTY ADMIN — admin-wa.js  (GoldenChat redesign)
+   Full media support: image, video, PDF, audio, voice recording.
+   File preview bar before sending. Caption support.
+   All Realtime, reactions, reply-quote, ticks intact.
 ================================================================ */
 
-/* ── State ──────────────────────────────────────────────────── */
+/* ── State ───────────────────────────────────────────────────── */
 let waMode = "bot";
 let waSessions = [];
 let waMessages = {};
@@ -21,7 +20,12 @@ let waMediaRecorder = null;
 let waAudioChunks = [];
 let waAudioPlayers = {};
 let waOnlineUsers = {};
-let waReactions = {}; // msgId → { adminKey: emoji, … }
+let waReactions = {};
+let waPendingFile = null; // { file, url, type, name, size }
+let waPendingCaption = "";
+let waAttachMenuOpen = false;
+let waRecordingTimer = null;
+let waRecordingStart = 0;
 
 const WA_EMOJIS = [
   "👍",
@@ -40,9 +44,13 @@ const WA_EMOJIS = [
   "✨",
   "🤩",
   "😊",
+  "😅",
+  "🫡",
+  "💪",
+  "🥳",
 ];
 
-/* ── Init (called when chat tab opens) ─────────────────────── */
+/* ── Init ────────────────────────────────────────────────────── */
 function waInit() {
   waRenderModeUI();
   if (waMode === "bot") waStartBot();
@@ -50,13 +58,14 @@ function waInit() {
   waSubscribeRealtime();
 }
 
-/* ── Mode toggle ────────────────────────────────────────────── */
+/* ── Mode ────────────────────────────────────────────────────── */
 function waSetMode(mode) {
   waMode = mode;
   waRenderModeUI();
   waMsgs().innerHTML = "";
   waActive = null;
   document.getElementById("waEmptyState").style.display = "flex";
+  waClearPreview();
   if (mode === "bot") {
     waStartBot();
     waShowSidebar();
@@ -65,7 +74,6 @@ function waSetMode(mode) {
     waShowSidebar();
   }
 }
-
 function waRenderModeUI() {
   document
     .getElementById("pillBot")
@@ -75,13 +83,13 @@ function waRenderModeUI() {
     ?.classList.toggle("active", waMode === "live");
 }
 
-/* ── Bot mode ───────────────────────────────────────────────── */
+/* ── Bot ─────────────────────────────────────────────────────── */
 function waStartBot() {
   const list = document.getElementById("waSessionList");
   list.innerHTML = `
     <div class="wa-session-item active" onclick="waSelectBot()">
-      <div class="wa-sess-ava" style="background:linear-gradient(135deg,#6c3aed,#9d4edd)">
-        <i class="fa-solid fa-robot" style="font-size:.9rem"></i>
+      <div class="wa-sess-ava" style="background:linear-gradient(135deg,#6c3aed,#9d4edd);color:#fff;font-size:1.1rem">
+        <i class="fa-solid fa-robot"></i>
       </div>
       <div class="wa-sess-info">
         <div class="wa-sess-name">Joy — AI Assistant</div>
@@ -93,15 +101,17 @@ function waStartBot() {
 
 function waSelectBot() {
   waActive = "joy";
-  document.getElementById("waHdAva").textContent = "🤖";
+  document.getElementById("waHdAva").innerHTML =
+    '<i class="fa-solid fa-robot"></i>';
   document.getElementById("waHdAva").style.background =
     "linear-gradient(135deg,#6c3aed,#9d4edd)";
+  document.getElementById("waHdAva").style.color = "#fff";
   document.getElementById("waHdName").textContent = "Joy — AI Assistant";
   document.getElementById("waHdSubTxt").textContent = "Gemini · live context";
   document.getElementById("waOnlineDot").style.display = "none";
   document.getElementById("waEmptyState").style.display = "none";
   waMsgs().innerHTML = "";
-  if (!waMessages["joy"] || !waMessages["joy"].length) {
+  if (!waMessages["joy"]?.length) {
     waAppendBubble({
       id: "bot-0",
       sender: "bot",
@@ -115,7 +125,7 @@ function waSelectBot() {
   waShowMain();
 }
 
-/* ── Live sessions ──────────────────────────────────────────── */
+/* ── Sessions ────────────────────────────────────────────────── */
 async function waLoadSessions() {
   try {
     const d = await waApi("/api/live-chat/sessions");
@@ -127,15 +137,16 @@ async function waLoadSessions() {
 function waRenderSessionList() {
   const list = document.getElementById("waSessionList");
   if (!waSessions.length) {
-    list.innerHTML = `<div style="padding:24px 16px;text-align:center;color:rgba(240,236,228,.25);font-size:.82rem">No live sessions yet</div>`;
+    list.innerHTML = `<div style="padding:28px 16px;text-align:center;color:rgba(238,236,232,.2);font-size:.83rem">No live sessions yet</div>`;
     return;
   }
   list.innerHTML = waSessions
     .map((s) => {
       const name = s.display_name || s.session_id.split("-")[0];
       const isOn = !!waOnlineUsers[s.session_id];
-      const isActive = s.session_id === waActive;
-      return `<div class="wa-session-item${isActive ? " active" : ""}" data-sid="${waEsc(s.session_id)}" onclick="waSelectSession('${waEsc(s.session_id)}','${waEsc(name)}')">
+      const active = s.session_id === waActive;
+      return `<div class="wa-session-item${active ? " active" : ""}" data-sid="${waEsc(s.session_id)}"
+      onclick="waSelectSession('${waEsc(s.session_id)}','${waEsc(name)}')">
       <div class="wa-sess-ava">
         ${name[0].toUpperCase()}
         <span class="wa-sess-online" style="display:${isOn ? "block" : "none"}"></span>
@@ -159,10 +170,10 @@ async function waSelectSession(sid, name) {
     .querySelector(`.wa-session-item[data-sid="${sid}"]`)
     ?.classList.add("active");
 
-  document.getElementById("waHdAva").textContent = (name ||
-    "?")[0].toUpperCase();
-  document.getElementById("waHdAva").style.background =
-    "linear-gradient(135deg,#4c3aad,#7c6ef0)";
+  const ava = document.getElementById("waHdAva");
+  ava.textContent = (name || "?")[0].toUpperCase();
+  ava.style.background = "linear-gradient(135deg,#d4af37,#8b6f1f)";
+  ava.style.color = "#111";
   document.getElementById("waHdName").textContent = name || sid.split("-")[0];
 
   const isOn = !!waOnlineUsers[sid];
@@ -209,7 +220,7 @@ async function waMarkRead(sid) {
   } catch (_) {}
 }
 
-/* ── Supabase Realtime ──────────────────────────────────────── */
+/* ── Realtime ────────────────────────────────────────────────── */
 function waSubscribeRealtime() {
   if (!sbClient) return;
   if (waRtCh) sbClient.removeChannel(waRtCh);
@@ -223,25 +234,22 @@ function waSubscribeRealtime() {
         const msg = payload.new;
         if (!msg) return;
         if (msg.sender === "admin" && waSentIds.has(String(msg.id))) return;
-
         if (!waMessages[msg.session_id]) waMessages[msg.session_id] = [];
         const exists = waMessages[msg.session_id].some(
           (m) => String(m.id) === String(msg.id),
         );
         if (!exists) waMessages[msg.session_id].push(msg);
-
         if (msg.session_id === waActive) {
           waRenderBubble(msg);
           waMarkRead(msg.session_id);
         } else {
           waLoadSessions();
-          if (typeof triggerNotification === "function") {
+          if (typeof triggerNotification === "function")
             triggerNotification(
               "New message from " + (msg.name || "a client"),
               msg.text,
               msg.session_id,
             );
-          }
           if (typeof playSound === "function") playSound("receive");
         }
       },
@@ -255,25 +263,21 @@ function waSubscribeRealtime() {
         waMessages[msg.session_id] = waMessages[msg.session_id].map((m) =>
           String(m.id) === String(msg.id) ? { ...m, ...msg } : m,
         );
-        // Update tick icons live
-        const el = document.querySelector(
+        const tickEl = document.querySelector(
           `[data-msg-id="${msg.id}"] .wa-ticks`,
         );
-        if (el) {
-          if (msg.read_at) {
-            el.className = "wa-ticks blue";
-            el.title = "Read";
-          } else if (msg.delivered_at) {
-            el.className = "wa-ticks grey";
-            el.title = "Delivered";
-          }
+        if (tickEl) {
+          tickEl.className = msg.read_at ? "wa-ticks blue" : "wa-ticks grey";
+          tickEl.querySelector("i").className =
+            msg.read_at || msg.delivered_at
+              ? "fa-solid fa-check-double"
+              : "fa-solid fa-check";
         }
       },
     )
     .on("broadcast", { event: "typing" }, ({ payload }) => {
-      if (payload.sender === "user" && payload.sessionId === waActive) {
+      if (payload.sender === "user" && payload.sessionId === waActive)
         waShowTyping(payload.typing);
-      }
     })
     .subscribe();
 
@@ -284,12 +288,11 @@ function waSubscribeRealtime() {
     .on("presence", { event: "sync" }, () => {
       const state = waPresenceCh.presenceState();
       waOnlineUsers = {};
-      Object.keys(state).forEach((key) => {
-        const entries = state[key];
-        entries.forEach((entry) => {
-          if (entry.user) waOnlineUsers[entry.user] = true;
-        });
-      });
+      Object.keys(state).forEach((key) =>
+        state[key].forEach((e) => {
+          if (e.user) waOnlineUsers[e.user] = true;
+        }),
+      );
       waRenderSessionList();
       if (waActive && waActive !== "joy") {
         const isOn = !!waOnlineUsers[waActive];
@@ -302,17 +305,16 @@ function waSubscribeRealtime() {
       }
     })
     .subscribe(async (status) => {
-      if (status === "SUBSCRIBED") {
+      if (status === "SUBSCRIBED")
         await waPresenceCh.track({
           user: "admin",
           role: "admin",
           online_at: new Date().toISOString(),
         });
-      }
     });
 }
 
-/* ── Render a bubble ────────────────────────────────────────── */
+/* ── Bubble render ────────────────────────────────────────────── */
 function waRenderBubble(msg) {
   const container = waMsgs();
   if (container.querySelector(`[data-msg-id="${msg.id}"]`)) return;
@@ -328,10 +330,11 @@ function waRenderBubble(msg) {
 
   // Date separator
   const prev = container.lastElementChild;
-  if (prev && prev.dataset.ts) {
-    const prevDate = new Date(prev.dataset.ts).toDateString();
-    const thisDate = new Date(msg.timestamp || Date.now()).toDateString();
-    if (prevDate !== thisDate) {
+  if (prev?.dataset.ts) {
+    if (
+      new Date(prev.dataset.ts).toDateString() !==
+      new Date(msg.timestamp || Date.now()).toDateString()
+    ) {
       const sep = document.createElement("div");
       sep.className = "wa-date-sep";
       sep.textContent = new Date(
@@ -346,82 +349,65 @@ function waRenderBubble(msg) {
   row.dataset.msgId = msg.id;
   row.dataset.ts = msg.timestamp || new Date().toISOString();
 
-  // Sender name (only for incoming from live)
-  let senderNameHtml = "";
-  if (!isOut && !isBot && waMode === "live") {
-    senderNameHtml = `<div class="wa-msg-sender-name">${waEsc(name)}</div>`;
-  }
+  const senderName =
+    !isOut && !isBot && waMode === "live"
+      ? `<div class="wa-msg-sender-name">${waEsc(name)}</div>`
+      : "";
 
-  // Quote
-  let quoteHtml = "";
-  if (msg.reply_preview) {
-    quoteHtml = `<div class="wa-quote" onclick="waScrollToMsg(${msg.reply_to_id})">
-      <i class="fa-solid fa-reply"></i>${waEsc(msg.reply_preview.substring(0, 60))}${msg.reply_preview.length > 60 ? "…" : ""}
-    </div>`;
-  }
+  const quoteHtml = msg.reply_preview
+    ? `<div class="wa-quote" onclick="waScrollToMsg(${msg.reply_to_id})">
+         <i class="fa-solid fa-reply"></i>${waEsc(msg.reply_preview.substring(0, 60))}${msg.reply_preview.length > 60 ? "…" : ""}
+       </div>`
+    : "";
 
-  // Content
-  const contentHtml = waRenderMsgContent(msg);
+  const content = waRenderMsgContent(msg);
 
-  // Ticks
   let ticksHtml = "";
   if (isOut) {
     const cls = msg.read_at ? "blue" : "grey";
-    const icon = msg.read_at
-      ? "fa-check-double"
-      : msg.delivered_at
-        ? "fa-check-double"
-        : "fa-check";
-    const title = msg.read_at
-      ? "Read"
-      : msg.delivered_at
-        ? "Delivered"
-        : "Sent";
-    ticksHtml = `<span class="wa-ticks ${cls}" title="${title}"><i class="fa-solid ${icon}"></i></span>`;
+    const icon =
+      msg.read_at || msg.delivered_at ? "fa-check-double" : "fa-check";
+    ticksHtml = `<span class="wa-ticks ${cls}"><i class="fa-solid ${icon}"></i></span>`;
   }
 
-  // Reactions
-  const rxHtml = waRenderReactions(rx, msg.id);
-
   row.innerHTML = `
-    ${senderNameHtml}
+    ${senderName}
     <div class="wa-bubble-wrap">
       ${!isOut ? `<div class="wa-bubble-ava">${name[0].toUpperCase()}</div>` : ""}
       <div class="wa-bubble" style="position:relative">
         ${quoteHtml}
-        ${contentHtml}
+        ${content}
         <div class="wa-msg-meta">
           <span class="wa-msg-time">${time}</span>
           ${ticksHtml}
         </div>
-        ${rxHtml}
+        ${waRenderReactions(rx, msg.id)}
       </div>
     </div>`;
 
-  // Hover: reaction + reply bar
+  // Hover reaction bar
   const bubble = row.querySelector(".wa-bubble");
-  let reactBarEl = null;
+  let reactEl = null;
   bubble.addEventListener("mouseenter", () => {
-    if (reactBarEl) return;
-    reactBarEl = document.createElement("div");
-    reactBarEl.className = "wa-react-bar";
-    const quickEmojis = ["👍", "❤️", "😂", "🔥", "😮"];
-    reactBarEl.innerHTML =
-      quickEmojis
+    if (reactEl) return;
+    reactEl = document.createElement("div");
+    reactEl.className = "wa-react-bar";
+    reactEl.innerHTML =
+      ["👍", "❤️", "😂", "🔥", "😮"]
         .map(
           (e) =>
             `<button class="wa-react-btn" onclick="waAddReaction(${msg.id},'${e}')">${e}</button>`,
         )
         .join("") +
       `<button class="wa-reply-btn" onclick="waSetReply(${JSON.stringify(msg).replace(/"/g, "&quot;")})" title="Reply">↩</button>`;
-    bubble.appendChild(reactBarEl);
+    bubble.appendChild(reactEl);
   });
   bubble.addEventListener("mouseleave", () => {
-    reactBarEl?.remove();
-    reactBarEl = null;
+    reactEl?.remove();
+    reactEl = null;
   });
 
-  // Long-press for mobile
+  // Long-press mobile
   let lp;
   bubble.addEventListener(
     "touchstart",
@@ -434,43 +420,78 @@ function waRenderBubble(msg) {
 
   container.appendChild(row);
 
-  // Animate
-  row.style.opacity = "0";
-  row.style.transform = "translateY(8px) scale(.97)";
+  // Animate in
+  row.style.cssText += ";opacity:0;transform:translateY(12px)";
   requestAnimationFrame(() => {
     row.style.transition =
-      "opacity .2s ease, transform .2s cubic-bezier(.34,1.2,.64,1)";
+      "opacity .3s ease, transform .3s cubic-bezier(.25,.46,.45,.94)";
     row.style.opacity = "1";
-    row.style.transform = "none";
+    row.style.transform = "translateY(0)";
   });
 
   container.scrollTop = container.scrollHeight;
 }
 
 function waRenderMsgContent(msg) {
-  if (msg.file_url) {
-    const ft = msg.file_type || "";
-    const fn = waEsc(msg.file_name || "file");
-    const url = waEsc(msg.file_url);
-    if (ft === "image")
-      return `<img src="${url}" class="wa-img-bubble" alt="${fn}" onclick="waOpenLightbox('${url}')" loading="lazy">`;
-    if (ft === "audio" || ft === "voice")
-      return `<div class="wa-audio">
+  if (!msg.file_url)
+    return `<span style="white-space:pre-wrap;word-break:break-word">${waEsc(msg.text)}</span>`;
+
+  const url = waEsc(msg.file_url);
+  const name = waEsc(msg.file_name || "file");
+  const size = msg.file_size ? waFmtSize(msg.file_size) : "";
+  const ft = msg.file_type || "";
+  const cap = msg.text
+    ? `<div style="margin-top:8px;font-size:.85rem;word-break:break-word">${waEsc(msg.text)}</div>`
+    : "";
+
+  if (ft === "image")
+    return `<div>
+      <img src="${url}" class="wa-img-bubble" alt="${name}"
+           onclick="waOpenMedia('${url}','image')" loading="lazy">
+      ${cap}
+    </div>`;
+
+  if (ft === "video")
+    return `<div>
+      <video class="wa-video-bubble" preload="metadata"
+             onclick="waOpenMedia('${url}','video')" title="${name}">
+        <source src="${url}">
+      </video>
+      ${cap}
+    </div>`;
+
+  if (ft === "audio" || ft === "voice")
+    return `<div>
+      <div class="wa-audio">
         <button class="wa-audio-btn" onclick="waToggleAudio(this,'${url}')">▶</button>
         <div class="wa-audio-track"><div class="wa-audio-prog"></div></div>
         <span class="wa-audio-dur">0:00</span>
-      </div>`;
-    if (ft === "pdf")
-      return `<div class="wa-file-bubble pdf" onclick="waOpenPdf('${url}','${fn}')">
-        <span style="font-size:1.4rem">📄</span>
-        <span class="wa-file-name">${fn}</span>
-        <span style="font-size:.72rem;opacity:.5">↗</span>
-      </div>`;
-    return `<a href="${url}" target="_blank" rel="noopener" class="wa-file-bubble">
-      📎 <span class="wa-file-name">${fn}</span>
-    </a>`;
-  }
-  return `<span style="white-space:pre-wrap;word-break:break-word">${waEsc(msg.text)}</span>`;
+      </div>
+      ${cap}
+    </div>`;
+
+  if (ft === "pdf")
+    return `<div>
+      <div class="wa-file-bubble pdf" onclick="waOpenPdf('${url}','${name}')">
+        <div class="wa-file-thumb"><i class="fa-solid fa-file-pdf" style="color:#ef4444"></i></div>
+        <div class="wa-file-details">
+          <div class="wa-file-name">${name}</div>
+          <div class="wa-file-size">${size}</div>
+        </div>
+      </div>
+      ${cap}
+    </div>`;
+
+  return `<div>
+    <a href="${url}" target="_blank" rel="noopener" class="wa-file-bubble">
+      <div class="wa-file-thumb"><i class="fa-solid fa-file"></i></div>
+      <div class="wa-file-details">
+        <div class="wa-file-name">${name}</div>
+        <div class="wa-file-size">${size}</div>
+      </div>
+    </a>
+    ${cap}
+  </div>`;
 }
 
 function waRenderReactions(rx, msgId) {
@@ -482,37 +503,28 @@ function waRenderReactions(rx, msgId) {
   });
   const pills = Object.entries(counts)
     .map(
-      ([emoji, count]) =>
-        `<button class="wa-reaction-pill" onclick="waAddReaction(${msgId},'${emoji}')">${emoji}<span class="wa-reaction-count">${count > 1 ? count : ""}</span></button>`,
+      ([e, c]) =>
+        `<button class="wa-reaction-pill" onclick="waAddReaction(${msgId},'${e}')">${e}<span class="wa-reaction-count">${c > 1 ? c : ""}</span></button>`,
     )
     .join("");
   return `<div class="wa-reactions" data-rxid="${msgId}">${pills}</div>`;
 }
 
-/* ── Reactions ──────────────────────────────────────────────── */
+/* ── Reactions ───────────────────────────────────────────────── */
 async function waAddReaction(msgId, emoji) {
   if (!sbClient || !waActive) return;
   const sid = waActive;
   if (!waMessages[sid]) return;
-
-  // Toggle locally
-  const msgIdx = waMessages[sid].findIndex(
-    (m) => String(m.id) === String(msgId),
-  );
-  if (msgIdx === -1) return;
-  const msg = { ...waMessages[sid][msgIdx] };
+  const idx = waMessages[sid].findIndex((m) => String(m.id) === String(msgId));
+  if (idx === -1) return;
+  const msg = { ...waMessages[sid][idx] };
   const rx = { ...(msg.reactions || {}) };
-  const key = "admin";
-  if (rx[key] === emoji) delete rx[key];
-  else rx[key] = emoji;
+  if (rx["admin"] === emoji) delete rx["admin"];
+  else rx["admin"] = emoji;
   msg.reactions = rx;
-  waMessages[sid][msgIdx] = msg;
-
-  // Update DOM
+  waMessages[sid][idx] = msg;
   const rxEl = document.querySelector(`.wa-reactions[data-rxid="${msgId}"]`);
   if (rxEl) rxEl.outerHTML = waRenderReactions(rx, msgId);
-
-  // Persist to Supabase
   try {
     await sbClient
       .from("live_chat_messages")
@@ -521,7 +533,7 @@ async function waAddReaction(msgId, emoji) {
   } catch (_) {}
 }
 
-/* ── Reply ──────────────────────────────────────────────────── */
+/* ── Reply ────────────────────────────────────────────────────── */
 function waSetReply(msg) {
   if (typeof msg === "string") {
     try {
@@ -534,9 +546,8 @@ function waSetReply(msg) {
     id: msg.id,
     text: (msg.text || msg.file_name || "📎 file").substring(0, 80),
   };
-  const bar = document.getElementById("waReplyBar");
   document.getElementById("waReplyText").textContent = waReplyTo.text;
-  bar.style.display = "flex";
+  document.getElementById("waReplyBar").style.display = "flex";
   document.getElementById("waInput").focus();
 }
 function waClearReply() {
@@ -547,24 +558,22 @@ function waScrollToMsg(id) {
   const el = document.querySelector(`[data-msg-id="${id}"]`);
   if (el) {
     el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.style.transition = "background .2s";
-    el.style.background = "rgba(212,168,75,.15)";
+    el.style.transition = "background .3s";
+    el.style.background = "rgba(212,175,55,.2)";
     setTimeout(() => {
       el.style.background = "";
-    }, 1200);
+    }, 1400);
   }
 }
 
-/* ── Typing indicator ────────────────────────────────────────── */
+/* ── Typing ───────────────────────────────────────────────────── */
 function waShowTyping(show) {
   const bar = document.getElementById("waTypingBar");
   bar.style.display = show ? "flex" : "none";
-  if (show) {
-    const name = document.getElementById("waHdName").textContent;
-    document.getElementById("waTypingLabel").textContent = name + " is typing";
-  }
+  if (show)
+    document.getElementById("waTypingLabel").textContent =
+      document.getElementById("waHdName").textContent + " is typing";
 }
-
 function waBroadcastTyping(t) {
   if (!waRtCh || waActive === "joy") return;
   if (!waIsTyping && t) {
@@ -588,7 +597,7 @@ function waSendTyping(t) {
     .catch(() => {});
 }
 
-/* ── Emoji picker ────────────────────────────────────────────── */
+/* ── Emoji picker ─────────────────────────────────────────────── */
 function waOpenEmoji() {
   const picker = document.getElementById("waEmojiPicker");
   const grid = document.getElementById("waEmojiGrid");
@@ -613,57 +622,123 @@ function waPasteEmoji(e) {
 document.addEventListener("click", (e) => {
   const picker = document.getElementById("waEmojiPicker");
   const btn = document.getElementById("waEmojiBtn");
-  if (picker && !picker.contains(e.target) && e.target !== btn)
+  if (
+    picker &&
+    !picker.contains(e.target) &&
+    e.target !== btn &&
+    !btn?.contains(e.target)
+  )
     picker.style.display = "none";
+  // Close attach menu
+  const menu = document.getElementById("waAttachMenu");
+  const attachBtn = document.getElementById("waAttachToggle");
+  if (
+    menu &&
+    waAttachMenuOpen &&
+    !menu.contains(e.target) &&
+    e.target !== attachBtn &&
+    !attachBtn?.contains(e.target)
+  ) {
+    menu.style.display = "none";
+    waAttachMenuOpen = false;
+  }
 });
 
-/* ── File attach ─────────────────────────────────────────────── */
-function waAttach() {
+/* ── Attach menu ─────────────────────────────────────────────── */
+function waToggleAttach() {
+  const menu = document.getElementById("waAttachMenu");
+  if (!menu) return;
+  waAttachMenuOpen = !waAttachMenuOpen;
+  menu.style.display = waAttachMenuOpen ? "flex" : "none";
+}
+
+function waTriggerFileInput(accept) {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = accept;
+  inp.onchange = (e) => {
+    waHandleFile(e.target.files[0]);
+    inp.value = "";
+  };
+  inp.click();
+  document.getElementById("waAttachMenu").style.display = "none";
+  waAttachMenuOpen = false;
+}
+
+async function waHandleFile(file) {
+  if (!file) return;
+  if (file.size > 50 * 1024 * 1024) {
+    if (typeof toast === "function") toast("Max 50 MB.", "error");
+    return;
+  }
   if (waMode === "bot") {
     if (typeof toast === "function")
       toast("Switch to Live mode to send files.", "info");
     return;
   }
-  document.getElementById("waFileInput").click();
+
+  // Determine type
+  let ft = "file";
+  if (file.type.startsWith("image/")) ft = "image";
+  else if (file.type.startsWith("video/")) ft = "video";
+  else if (file.type === "application/pdf") ft = "pdf";
+  else if (file.type.startsWith("audio/")) ft = "audio";
+
+  // Build local preview URL
+  const localUrl = URL.createObjectURL(file);
+  waPendingFile = {
+    file,
+    url: localUrl,
+    type: ft,
+    name: file.name,
+    size: file.size,
+  };
+  waPendingCaption = "";
+  waShowPreviewBar();
 }
 
-async function waHandleFile(input) {
-  const file = input.files[0];
-  if (!file) return;
-  if (file.size > 10 * 1024 * 1024) {
-    if (typeof toast === "function") toast("Max file size is 10 MB.", "error");
-    return;
-  }
-  input.value = "";
-  if (!sbClient) {
-    if (typeof toast === "function") toast("Supabase not connected.", "error");
-    return;
-  }
+function waShowPreviewBar() {
+  const bar = document.getElementById("waPreviewBar");
+  if (!bar || !waPendingFile) return;
+  const f = waPendingFile;
 
-  if (typeof toast === "function") toast("Uploading…", "info");
-  try {
-    const ext = file.name.split(".").pop() || "bin";
-    const path = `chat/admin-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-    const ft = file.type.startsWith("image/")
-      ? "image"
-      : file.type === "application/pdf"
-        ? "pdf"
-        : file.type.startsWith("audio/")
-          ? "audio"
-          : "file";
+  let thumbHtml = "";
+  if (f.type === "image")
+    thumbHtml = `<div class="wa-preview-thumb"><img src="${f.url}" alt="preview"></div>`;
+  else if (f.type === "video")
+    thumbHtml = `<div class="wa-preview-thumb"><i class="fa-solid fa-video" style="color:#a78bfa"></i></div>`;
+  else if (f.type === "pdf")
+    thumbHtml = `<div class="wa-preview-thumb"><i class="fa-solid fa-file-pdf" style="color:#ef4444"></i></div>`;
+  else if (f.type === "audio")
+    thumbHtml = `<div class="wa-preview-thumb"><i class="fa-solid fa-music" style="color:#d4af37"></i></div>`;
+  else
+    thumbHtml = `<div class="wa-preview-thumb"><i class="fa-solid fa-file" style="color:#60a5fa"></i></div>`;
 
-    const { error: upErr } = await sbClient.storage
-      .from("chat-files")
-      .upload(path, file, { cacheControl: "3600" });
-    if (upErr) throw new Error(upErr.message);
-    const { data: pub } = sbClient.storage
-      .from("chat-files")
-      .getPublicUrl(path);
+  bar.innerHTML = `
+    <div class="wa-preview-bar">
+      <div class="wa-preview-content">
+        ${thumbHtml}
+        <div class="wa-preview-info">
+          <div class="wa-preview-name">${waEsc(f.name)}</div>
+          <div style="font-size:.72rem;color:rgba(238,236,232,.45)">${waFmtSize(f.size)}</div>
+        </div>
+        <button class="wa-preview-close" onclick="waClearPreview()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <input class="wa-caption-input" id="waCaptionInput" placeholder="Add a caption…"
+        value="${waEsc(waPendingCaption)}"
+        oninput="waPendingCaption=this.value">
+    </div>`;
+  bar.style.display = "block";
+  document.getElementById("waCaptionInput")?.focus();
+}
 
-    await waPostMsg("", pub.publicUrl, ft, file.name, file.size);
-  } catch (e) {
-    if (typeof toast === "function")
-      toast("Upload failed: " + e.message, "error");
+function waClearPreview() {
+  waPendingFile = null;
+  waPendingCaption = "";
+  const bar = document.getElementById("waPreviewBar");
+  if (bar) {
+    bar.innerHTML = "";
+    bar.style.display = "none";
   }
 }
 
@@ -674,12 +749,19 @@ async function waToggleRec(btn) {
       toast("Switch to Live mode to record.", "info");
     return;
   }
+
   if (waMediaRecorder && waMediaRecorder.state === "recording") {
+    // Stop recording
     waMediaRecorder.stop();
     btn.innerHTML = '<i class="fa-solid fa-microphone"></i>';
     btn.classList.remove("recording");
+    btn.title = "Voice note";
+    clearInterval(waRecordingTimer);
+    btn.textContent = "";
+    btn.innerHTML = '<i class="fa-solid fa-microphone"></i>';
     return;
   }
+
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     waMediaRecorder = new MediaRecorder(stream);
@@ -691,73 +773,83 @@ async function waToggleRec(btn) {
       const file = new File([blob], `voice-${Date.now()}.webm`, {
         type: "audio/webm",
       });
-      if (!sbClient) return;
-      try {
-        const path = `chat/voice-admin-${Date.now()}.webm`;
-        await sbClient.storage
-          .from("chat-files")
-          .upload(path, file, { cacheControl: "3600" });
-        const { data: pub } = sbClient.storage
-          .from("chat-files")
-          .getPublicUrl(path);
-        await waPostMsg("", pub.publicUrl, "voice", file.name, file.size);
-      } catch (_) {}
+      // Show in preview bar then let user send
+      waPendingFile = {
+        file,
+        url: URL.createObjectURL(blob),
+        type: "voice",
+        name: file.name,
+        size: file.size,
+      };
+      waPendingCaption = "";
+      waShowPreviewBar();
     };
     waMediaRecorder.start();
     btn.innerHTML = '<i class="fa-solid fa-stop"></i>';
     btn.classList.add("recording");
+    // Show recording timer
+    waRecordingStart = Date.now();
+    waRecordingTimer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - waRecordingStart) / 1000);
+      const m = Math.floor(elapsed / 60)
+        .toString()
+        .padStart(2, "0");
+      const s = (elapsed % 60).toString().padStart(2, "0");
+      btn.title = `Recording ${m}:${s} — click to stop`;
+    }, 1000);
   } catch (_) {
     if (typeof toast === "function")
       toast("Microphone permission denied.", "error");
   }
 }
 
-/* ── Audio player ────────────────────────────────────────────── */
-function waToggleAudio(btn, src) {
-  let audio = waAudioPlayers[src];
-  if (!audio) {
-    audio = new Audio(src);
-    waAudioPlayers[src] = audio;
-    const bar = btn.nextElementSibling;
-    const dur = bar?.nextElementSibling;
-    audio.addEventListener("timeupdate", () => {
-      const p = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
-      const prog = bar?.querySelector(".wa-audio-prog");
-      if (prog) prog.style.width = p + "%";
-      if (dur) dur.textContent = waFmtTime(audio.currentTime);
-    });
-    audio.addEventListener("ended", () => {
-      btn.textContent = "▶";
-    });
-  }
-  if (audio.paused) {
-    audio.play();
-    btn.textContent = "⏸";
-  } else {
-    audio.pause();
-    btn.textContent = "▶";
-  }
-}
-function waFmtTime(s) {
-  const m = Math.floor(s / 60);
-  return m + ":" + (Math.floor(s % 60) + "").padStart(2, "0");
+/* ── Upload to Supabase Storage ──────────────────────────────── */
+async function waUploadToStorage(file, ft) {
+  if (!sbClient) throw new Error("Supabase not connected");
+  const ext = file.name.split(".").pop() || "bin";
+  const path = `chat/admin-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+  const { error } = await sbClient.storage
+    .from("chat-files")
+    .upload(path, file, { cacheControl: "3600" });
+  if (error) throw new Error(error.message);
+  const { data: pub } = sbClient.storage.from("chat-files").getPublicUrl(path);
+  return pub.publicUrl;
 }
 
 /* ── Send ────────────────────────────────────────────────────── */
 async function waSend() {
   const inp = document.getElementById("waInput");
   const text = inp.value.trim();
-  if (!text) return;
+  const hasFile = !!waPendingFile;
+
+  if (!text && !hasFile) return;
   inp.value = "";
   waIsTyping = false;
   waSendTyping(false);
   document.getElementById("waEmojiPicker").style.display = "none";
 
   if (waMode === "bot" || waActive === "joy") {
-    waBotReply(text);
+    if (text) waBotReply(text);
+    waClearPreview();
     return;
   }
   if (!waActive) return;
+
+  if (hasFile) {
+    const f = waPendingFile;
+    const caption = waPendingCaption.trim();
+    waClearPreview();
+    if (typeof toast === "function") toast("Sending…", "info");
+    try {
+      const uploadedUrl = await waUploadToStorage(f.file, f.type);
+      await waPostMsg(caption, uploadedUrl, f.type, f.name, f.size);
+    } catch (e) {
+      if (typeof toast === "function")
+        toast("Upload failed: " + e.message, "error");
+    }
+    return;
+  }
+
   await waPostMsg(text);
 }
 
@@ -785,7 +877,6 @@ async function waPostMsg(
     reactions: {},
     delivered_at: new Date().toISOString(),
   };
-
   if (!waMessages[waActive]) waMessages[waActive] = [];
   waMessages[waActive].push(fakeMsg);
   waRenderBubble(fakeMsg);
@@ -832,12 +923,10 @@ async function waBotReply(text) {
     timestamp: new Date().toISOString(),
   });
   if (typeof playSound === "function") playSound("send");
-
-  // Typing dots
   waShowTyping(true);
   document.getElementById("waTypingLabel").textContent = "Joy is thinking";
 
-  const ctx = `You are Joy, AI assistant for Joyalty Photography admin dashboard.
+  const ctx = `You are Joy, AI assistant for Joyalty Photography admin.
 LIVE DATA: Bookings:${typeof allBookings !== "undefined" ? allBookings.length : 0}, Confirmed:${typeof allBookings !== "undefined" ? allBookings.filter((b) => b.status === "confirmed").length : 0}, Revenue: KSh ${typeof allBookings !== "undefined" ? allBookings.reduce((a, b) => a + Number(b.deposit_paid || 0), 0).toLocaleString() : "0"}, Clients:${typeof allClients !== "undefined" ? allClients.length : 0}. Today:${new Date().toLocaleDateString("en-KE", { dateStyle: "full" })}.`;
 
   const history = (waMessages["joy"] || [])
@@ -850,19 +939,17 @@ LIVE DATA: Bookings:${typeof allBookings !== "undefined" ? allBookings.length : 
       .map((m) => ({ role: "user", parts: [{ text: m.text }] })),
     { role: "user", parts: [{ text }] },
   ];
-
   try {
     const res = await waApi("/api/gemini-chat", {
       method: "POST",
       body: JSON.stringify({ messages: formatted }),
     });
     waShowTyping(false);
-    const reply = res.reply || "I couldn't respond right now.";
     waAppendBubble({
       id: "b-" + Date.now(),
       sender: "bot",
       name: "Joy",
-      text: reply,
+      text: res.reply || "I couldn't respond.",
       timestamp: new Date().toISOString(),
     });
     if (typeof playSound === "function") playSound("receive");
@@ -884,7 +971,7 @@ function waAppendBubble(msg) {
   waRenderBubble(msg);
 }
 
-/* ── Clear chat ──────────────────────────────────────────────── */
+/* ── Clear ───────────────────────────────────────────────────── */
 function waClearChat() {
   if (waActive === "joy") {
     waMessages["joy"] = [];
@@ -899,13 +986,31 @@ function waClearChat() {
   }
 }
 
-/* ── Lightbox / PDF ──────────────────────────────────────────── */
+/* ── Media viewer ─────────────────────────────────────────────── */
+function waOpenMedia(src, type) {
+  const lb = document.getElementById("waLightbox");
+  const content = document.getElementById("waLightboxContent");
+  if (!lb || !content) return;
+
+  if (type === "image") {
+    content.innerHTML = `
+      <button class="wa-lightbox-close" onclick="waCloseLightbox()"><i class="fa-solid fa-xmark"></i></button>
+      <img src="${src}" alt="image" style="max-width:100%;max-height:85vh;display:block">`;
+  } else if (type === "video") {
+    content.innerHTML = `
+      <button class="wa-lightbox-close" onclick="waCloseLightbox()"><i class="fa-solid fa-xmark"></i></button>
+      <video controls autoplay style="max-width:100%;max-height:85vh;display:block">
+        <source src="${src}">
+      </video>`;
+  }
+  lb.style.display = "flex";
+}
 function waOpenLightbox(src) {
-  document.getElementById("waLightboxImg").src = src;
-  document.getElementById("waLightbox").style.display = "flex";
+  waOpenMedia(src, "image");
 }
 function waCloseLightbox() {
-  document.getElementById("waLightbox").style.display = "none";
+  const lb = document.getElementById("waLightbox");
+  if (lb) lb.style.display = "none";
 }
 
 function waOpenPdf(src, name) {
@@ -928,7 +1033,34 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-/* ── Mobile nav ──────────────────────────────────────────────── */
+/* ── Audio player ─────────────────────────────────────────────── */
+function waToggleAudio(btn, src) {
+  let audio = waAudioPlayers[src];
+  if (!audio) {
+    audio = new Audio(src);
+    waAudioPlayers[src] = audio;
+    const bar = btn.nextElementSibling,
+      dur = bar?.nextElementSibling;
+    audio.addEventListener("timeupdate", () => {
+      const p = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
+      const prog = bar?.querySelector(".wa-audio-prog");
+      if (prog) prog.style.width = p + "%";
+      if (dur) dur.textContent = waFmtTime(audio.currentTime);
+    });
+    audio.addEventListener("ended", () => {
+      btn.textContent = "▶";
+    });
+  }
+  if (audio.paused) {
+    audio.play();
+    btn.textContent = "⏸";
+  } else {
+    audio.pause();
+    btn.textContent = "▶";
+  }
+}
+
+/* ── Mobile ───────────────────────────────────────────────────── */
 function waShowMain() {
   if (window.innerWidth <= 768) {
     document.getElementById("waSidebar")?.classList.add("hidden");
@@ -953,6 +1085,15 @@ function waEsc(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+function waFmtTime(s) {
+  const m = Math.floor(s / 60);
+  return m + ":" + (Math.floor(s % 60) + "").padStart(2, "0");
+}
+function waFmtSize(b) {
+  if (b < 1024) return b + " B";
+  if (b < 1024 * 1024) return (b / 1024).toFixed(1) + " KB";
+  return (b / 1024 / 1024).toFixed(1) + " MB";
+}
 async function waApi(url, opts = {}) {
   const r = await fetch(url, {
     headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
@@ -970,9 +1111,25 @@ async function waApi(url, opts = {}) {
 const _origSwitchTab = window.switchTab;
 window.switchTab = function (tab, silent) {
   if (typeof _origSwitchTab === "function") _origSwitchTab(tab, silent);
-  if (tab === "chat") {
-    setTimeout(() => {
-      waInit();
-    }, 50);
-  }
+  if (tab === "chat") setTimeout(() => waInit(), 50);
 };
+
+/* ── Additional helpers needed by the new HTML ───────────────── */
+
+// Session search filter
+function waFilterSessions(q) {
+  const lq = q.toLowerCase().trim();
+  document.querySelectorAll(".wa-session-item[data-sid]").forEach((el) => {
+    const name =
+      el.querySelector(".wa-sess-name")?.textContent?.toLowerCase() || "";
+    const prev =
+      el.querySelector(".wa-sess-prev")?.textContent?.toLowerCase() || "";
+    el.style.display =
+      !lq || name.includes(lq) || prev.includes(lq) ? "" : "none";
+  });
+}
+
+// Refresh sessions button
+function waRefreshSessions() {
+  if (waMode === "live") waLoadSessions();
+}

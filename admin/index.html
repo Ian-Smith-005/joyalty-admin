@@ -340,13 +340,13 @@
           </div>
         </section>
 
-        <!-- CHAT — WhatsApp-style, powered by admin-wa.js -->
+        <!-- CHAT -->
         <section class="tab" id="tab-chat">
-          <div class="wa-shell glass-card">
+          <div class="wa-shell">
             <!-- Sidebar: session list -->
             <div class="wa-sidebar" id="waSidebar">
               <div class="wa-sidebar-hd">
-                <span class="wa-sidebar-title">Messages</span>
+                <span class="wa-sidebar-title">GoldenChat</span>
                 <div class="wa-mode-pills">
                   <button
                     class="wa-pill active"
@@ -364,11 +364,20 @@
                   </button>
                 </div>
               </div>
+              <div class="wa-search">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input
+                  type="text"
+                  placeholder="Search conversations…"
+                  oninput="waFilterSessions(this.value)"
+                />
+              </div>
               <div class="wa-session-list" id="waSessionList"></div>
             </div>
 
             <!-- Chat main -->
             <div class="wa-main" id="waMain">
+              <!-- Header -->
               <div class="wa-main-hd">
                 <button class="wa-back" onclick="waShowSidebar()">
                   <i class="fa-solid fa-arrow-left"></i>
@@ -395,6 +404,13 @@
                   >
                     <i class="fa-solid fa-broom"></i>
                   </button>
+                  <button
+                    class="wa-icon-btn"
+                    onclick="waRefreshSessions()"
+                    title="Refresh"
+                  >
+                    <i class="fa-solid fa-rotate-right"></i>
+                  </button>
                 </div>
               </div>
 
@@ -414,7 +430,10 @@
                 </div>
               </div>
 
-              <!-- Reply bar (injected by admin-wa.js when quoting) -->
+              <!-- File preview bar (shows pending attachment before send) -->
+              <div id="waPreviewBar" style="display: none"></div>
+
+              <!-- Reply bar -->
               <div class="wa-reply-bar" id="waReplyBar" style="display: none">
                 <div class="wa-reply-inner">
                   <i class="fa-solid fa-reply"></i>
@@ -427,41 +446,76 @@
 
               <!-- Input bar -->
               <div class="wa-input-bar" style="position: relative">
+                <!-- Attach menu toggle -->
                 <button
                   class="wa-bar-btn"
-                  id="waEmojiBtn"
-                  onclick="waOpenEmoji()"
-                  title="Emoji"
-                >
-                  <i class="fa-solid fa-face-smile"></i>
-                </button>
-                <button
-                  class="wa-bar-btn"
-                  onclick="waAttach()"
-                  title="Attach file"
+                  id="waAttachToggle"
+                  onclick="waToggleAttach()"
+                  title="Attach"
                 >
                   <i class="fa-solid fa-paperclip"></i>
                 </button>
-                <input
-                  type="file"
-                  id="waFileInput"
-                  accept="image/*,.pdf,audio/*"
+
+                <!-- Attach menu -->
+                <div
+                  class="wa-attach-menu"
+                  id="waAttachMenu"
                   style="display: none"
-                  onchange="waHandleFile(this)"
-                />
-                <input
-                  type="text"
-                  id="waInput"
-                  class="wa-text-input"
-                  placeholder="Type a message…"
-                  onkeypress="
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault();
-                      waSend();
-                    }
-                  "
-                  oninput="waBroadcastTyping(true)"
-                />
+                >
+                  <div
+                    class="wa-attach-item"
+                    onclick="waTriggerFileInput('image/*,video/*')"
+                  >
+                    <i class="fa-solid fa-image" style="color: #4ade80"></i>
+                    <span>Photo or Video</span>
+                  </div>
+                  <div
+                    class="wa-attach-item"
+                    onclick="
+                      waTriggerFileInput(
+                        'application/pdf,.doc,.docx,.xls,.xlsx,.txt',
+                      )
+                    "
+                  >
+                    <i class="fa-solid fa-file-alt" style="color: #60a5fa"></i>
+                    <span>Document</span>
+                  </div>
+                  <div
+                    class="wa-attach-item"
+                    onclick="waTriggerFileInput('audio/*')"
+                  >
+                    <i class="fa-solid fa-music" style="color: #d4af37"></i>
+                    <span>Audio File</span>
+                  </div>
+                </div>
+
+                <!-- Text input wrapper -->
+                <div class="wa-input-inner">
+                  <button
+                    class="wa-bar-btn"
+                    id="waEmojiBtn"
+                    onclick="waOpenEmoji()"
+                    title="Emoji"
+                    style="padding: 4px 6px"
+                  >
+                    <i class="fa-solid fa-face-smile"></i>
+                  </button>
+                  <input
+                    type="text"
+                    id="waInput"
+                    class="wa-text-input"
+                    placeholder="Type a message…"
+                    onkeypress="
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        waSend();
+                      }
+                    "
+                    oninput="waBroadcastTyping(true)"
+                  />
+                </div>
+
+                <!-- Voice record -->
                 <button
                   class="wa-bar-btn"
                   id="waRecBtn"
@@ -470,10 +524,13 @@
                 >
                   <i class="fa-solid fa-microphone"></i>
                 </button>
-                <button class="wa-send-btn" onclick="waSend()">
+
+                <!-- Send -->
+                <button class="wa-send-btn" onclick="waSend()" title="Send">
                   <i class="fa-solid fa-paper-plane"></i>
                 </button>
-                <!-- Emoji picker (positioned absolute inside this div) -->
+
+                <!-- Emoji picker (absolute positioned) -->
                 <div
                   class="wa-emoji-picker"
                   id="waEmojiPicker"
@@ -485,22 +542,16 @@
             </div>
           </div>
 
-          <!-- Image lightbox -->
+          <!-- Image / Video lightbox -->
           <div
             class="wa-lightbox"
             id="waLightbox"
             style="display: none"
-            onclick="waCloseLightbox()"
+            onclick="if (event.target === this) waCloseLightbox();"
           >
-            <img id="waLightboxImg" src="" alt="" />
-            <button
-              onclick="
-                event.stopPropagation();
-                waCloseLightbox();
-              "
-            >
-              <i class="fa-solid fa-xmark"></i>
-            </button>
+            <div class="wa-lightbox-content" id="waLightboxContent">
+              <!-- filled dynamically -->
+            </div>
           </div>
 
           <!-- PDF modal -->
@@ -515,8 +566,9 @@
                     target="_blank"
                     rel="noopener"
                     class="wa-pdf-dl"
-                    ><i class="fa-solid fa-download"></i> Download</a
                   >
+                    <i class="fa-solid fa-download"></i> Download
+                  </a>
                   <button onclick="waClosePdf()">
                     <i class="fa-solid fa-xmark"></i>
                   </button>
